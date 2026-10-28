@@ -1,0 +1,40 @@
+# Terraform: local state, downloaded providers, plans, and private values
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+!*.tfvars.json.example
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Credentials and local environment settings
+.aws/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python: local environments, caches, and build output
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# macOS
+.DS_Store
