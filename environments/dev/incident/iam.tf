@@ -13,6 +13,24 @@ resource "aws_iam_role" "lambda_execution" {
     }]
   })
 
-  # 操作権限は対象リソースの定義時に追加する。
-  # Lambda自身のログ送信・ECSログの読み取り・Bedrock呼び出し・S3保存を想定。
+  # ECSログの読み取り・Bedrock呼び出し・S3保存の権限は今後追加する。
+}
+
+resource "aws_iam_role_policy" "lambda_execution_logs" {
+  name = "aii-dev-incident-lambda-write-logs"
+  role = aws_iam_role.lambda_execution.id
+
+  # ロググループはTerraformで作成するため、作成権限は不要。
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+      ]
+      # Lambda自身のロググループ内のストリームだけに書き込みを許可する。
+      Resource = "${aws_cloudwatch_log_group.lambda.arn}:log-stream:*"
+    }]
+  })
 }

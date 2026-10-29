@@ -2,7 +2,7 @@
 
 ECSタスクの異常停止を検知し、生成AIによる調査レポートを残す検証用プロジェクト。
 
-**現在はネットワーク・ECSクラスター・Nginx用ロググループ・タスク実行用IAMロール・正常系タスク定義・タスク用Security Group・停止検知用EventBridgeルール・Lambda実行用IAMロール本体・Lambda用ロググループのTerraform定義まで作成済み。Lambda本体・実行ロールの操作権限・Bedrock連携・S3と、EventBridgeのターゲットは未実装。タスク起動手順と異常系の検証設定は未整備。AWSへの構築は未実施。** 設計と手順は、まずこのREADMEに集約する。
+**現在はネットワーク・ECSクラスター・Nginx用ロググループ・タスク実行用IAMロール・正常系タスク定義・タスク用Security Group・停止検知用EventBridgeルール・Lambda実行用IAMロールとログ送信権限・Lambda用ロググループ・受信確認用Lambda本体のTerraform定義とPython処理まで作成済み。ECSログの読み取り権限・Bedrock連携・S3と、EventBridgeのターゲットは未実装。タスク起動手順と異常系の検証設定は未整備。AWSへの構築は未実施。** 設計と手順は、まずこのREADMEに集約する。
 
 ## 最初の完成条件
 
@@ -68,8 +68,8 @@ Lambdaは発生時刻、タスクARN、停止理由、コンテナ終了コー�
 - タスク実行用IAMロールは、Nginx用ロググループ内のログストリーム作成・ログ送信のみを許可する。
 - イメージ取得などに必要な通信は、Public IPとInternet Gateway経由で確保する。
 - Lambdaは初期構成ではVPCに接続しない。
-- Lambda関数名は`aii-dev-incident`を予定し、実行ログ用グループは`/aws/lambda/aii-dev-incident`に保存期間3日で定義する。ログ送信権限とLambda本体との接続は今後追加する。
-- Lambda実行ロールは`aii-dev-incident-lambda-execution`。現段階はLambdaが引き受けるための信頼ポリシーのみで、操作権限は未付与。ログ・使用モデル・保存先の定義に合わせて、対象を絞った権限を追加する。
+- Lambda関数名は`aii-dev-incident`。Python 3.14・arm64・メモリ128 MiB・タイムアウト10秒で定義し、実行ログ用グループ`/aws/lambda/aii-dev-incident`（保存期間3日）と実行ロールを接続する。現段階はイベントID・タスクARN・終了コードなどの受信確認のみをログに出す。環境変数などが含まれ得るイベント全体は出力せず、正常・異常の分類もまだ行わない。
+- Lambda実行ロールは`aii-dev-incident-lambda-execution`。自身のロググループ内のログストリーム作成・ログ送信のみを許可する。ロググループはTerraformで作成するため、Lambdaにロググループ作成権限は付けない。ECSログの読み取り・Bedrock呼び出し・S3保存は、対象リソースの定義に合わせて権限を追加する。
 - IAMは最小権限。S3はパブリックアクセスを禁止し、暗号化する。
 - 認証情報・Terraform State・機密値はGitに含めない。
 
@@ -87,10 +87,12 @@ environments/dev/
 │   ├── .terraform.lock.hcl # Providerの使用バージョン（作成済み）
 │   └── network.tf      # VPC・Subnet・Internet Gateway・ルート設定
 ├── ecs/                # ECSクラスター・ログ・実行権限・正常系タスク定義・Security Group
-└── incident/           # 停止検知ルール・Lambda実行ロール本体・Lambda用ロググループまで作成済み。Lambda本体・S3・操作権限は今後追加
+└── incident/           # 停止検知ルール・Lambda実行ロールとログ送信権限・Lambda用ロググループ・受信確認用Lambdaまで作成済み。EventBridge接続・S3・分析用権限は今後追加
 ```
 
 各ディレクトリにProvider・バージョン設定を置き、個別にinit・plan・applyする。同じディレクトリの`.tf`ファイルはまとめて読み込まれるが、隣のディレクトリは自動では読み込まれない。CloudWatch LogsとIAMは、利用するECS・Lambda側で管理する。
+
+`incident/lambda/handler.py`がLambdaの処理本体。Archive Providerで`incident/build/incident-lambda.zip`にまとめ、コードのハッシュで変更を検知する。`build/`はGit管理対象外。ZIPはplan時に生成されるため、保存したplanをapplyする際はZIPも保持する。
 
 ネットワーク、検証タスク、障害分析という変更目的で分ける。`incident/`内は`eventbridge.tf`・`lambda.tf`・`s3.tf`などに整理し、分析機能としてまとめて管理する。
 
