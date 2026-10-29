@@ -2,7 +2,7 @@
 
 ECSタスクの異常停止を検知し、生成AIによる調査レポートを残す検証用プロジェクト。
 
-**現在は設計のみ。コード作成・AWSへの構築は未実施。** 設計と手順は、まずこのREADMEに集約する。
+**現在はTerraformのバージョン条件・Provider設定まで作成済み。AWSへの構築は未実施。** 設計と手順は、まずこのREADMEに集約する。
 
 ## 最初の完成条件
 
@@ -65,13 +65,40 @@ Lambdaは発生時刻、タスクARN、停止理由、コンテナ終了コー�
 
 ## 検証環境の方針
 
-- dev環境のみ。Terraformは`environments/dev`と`modules`を分け、モジュール数は必要最小限にする。
+- dev環境のみ。Terraformは`network`・`ecs`・`incident`の3つに実行ディレクトリ・Stateを分け、最初は子モジュールを作らない。
 - 1 AZ・Public Subnet 1つ。ALB・NAT Gatewayは作成しない。
 - タスクは検証時だけ起動する。インバウンド通信は禁止する。
 - イメージ取得などに必要な通信は、Public IPとInternet Gateway経由で確保する。
 - Lambdaは初期構成ではVPCに接続しない。
 - IAMは最小権限。S3はパブリックアクセスを禁止し、暗号化する。
 - 認証情報・Terraform State・機密値はGitに含めない。
+
+## Terraformのファイル構成
+
+以下は予定構成。現在は`network/`の初期設定のみ作成済み。他のディレクトリ・ファイルは必要になった段階で追加し、構成が固まってからモジュール化を検討する。
+
+```text
+environments/dev/
+├── network/            # VPC・Subnet・通信経路
+│   ├── versions.tf     # バージョン条件・ローカルState設定（作成済み）
+│   ├── providers.tf    # AWS Provider・共通タグ（作成済み）
+│   ├── .terraform.lock.hcl # Providerの使用バージョン（作成済み）
+│   └── network.tf      # ネットワーク定義（今後追加）
+├── ecs/                # ECS・タスク定義・ログ・関連する権限
+└── incident/           # EventBridge・Lambda・S3・ログ・分析用権限
+```
+
+各ディレクトリにProvider・バージョン設定を置き、個別にinit・plan・applyする。同じディレクトリの`.tf`ファイルはまとめて読み込まれるが、隣のディレクトリは自動では読み込まれない。CloudWatch LogsとIAMは、利用するECS・Lambda側で管理する。
+
+ネットワーク、検証タスク、障害分析という変更目的で分ける。`incident/`内は`eventbridge.tf`・`lambda.tf`・`s3.tf`などに整理し、分析機能としてまとめて管理する。
+
+Stateは各ディレクトリの`terraform.tfstate`にローカル保存する（例：`environments/dev/network/terraform.tfstate`）。Gitには含めず、AWS構築後は変更・削除に備えて保管する。各ディレクトリの`.terraform.lock.hcl`はGit管理する。
+
+ディレクトリ間で必要なSubnet ID・ARNなどは、作成元のoutputから利用側の入力へ渡す。具体的な受け渡し方法は実装時に決める。作成は依存先から、削除は利用側から行う。Stateを分けるため、全体の実行順序はTerraformが自動調整しない。
+
+全体の構築順は`network` → `ecs` → `incident`、削除順はその逆とする。後からモジュール化する際は、既存Stateを維持し、`moved`ブロックなどでリソースのアドレス変更に対応する。
+
+初期版はNginx公式イメージを利用するため、専用のECRリポジトリは作成しない。
 
 ## 進め方
 
