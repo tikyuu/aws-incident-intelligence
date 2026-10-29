@@ -2,7 +2,7 @@
 
 ECSタスクの異常停止を検知し、生成AIによる調査レポートを残す検証用プロジェクト。
 
-**現在はネットワーク・ECSクラスター・Nginx用ロググループ・タスク実行用IAMロール・正常系タスク定義・タスク用Security GroupのTerraform定義まで作成済み。タスク起動時のSubnet・Security Group・Public IPの指定手順と、異常系の検証設定は未整備。AWSへの構築は未実施。** 設計と手順は、まずこのREADMEに集約する。
+**現在はネットワーク・ECSクラスター・Nginx用ロググループ・タスク実行用IAMロール・正常系タスク定義・タスク用Security Group・停止検知用EventBridgeルールのTerraform定義まで作成済み。Lambda・Bedrock連携・S3と、EventBridgeのターゲットは未実装。タスク起動手順と異常系の検証設定は未整備。AWSへの構築は未実施。** 設計と手順は、まずこのREADMEに集約する。
 
 ## 最初の完成条件
 
@@ -31,6 +31,8 @@ Nginxの設定を意図的に間違えてECSタスクを異常停止させ、停
 ## 正常停止と異常停止
 
 EventBridgeは停止を検知し、Lambdaが停止理由・終了コード・タスクの用途を組み合わせて分類する。
+
+EventBridgeルールはデフォルトイベントバス上で、`source = aws.ecs`・`detail-type = ECS Task State Change`・`detail.lastStatus = STOPPED`に一致し、`detail.clusterArn`が対象クラスターARNのイベントを拾う。ECS側の`cluster_arn`出力をincident側の`ecs_cluster_arn`入力変数へ渡す。現段階はルールのみで、Lambdaへの送信はターゲットと呼び出し許可を追加してから有効になる。
 
 | ケース | 扱い |
 | --- | --- |
@@ -83,7 +85,7 @@ environments/dev/
 │   ├── .terraform.lock.hcl # Providerの使用バージョン（作成済み）
 │   └── network.tf      # VPC・Subnet・Internet Gateway・ルート設定
 ├── ecs/                # ECSクラスター・ログ・実行権限・正常系タスク定義・Security Group
-└── incident/           # EventBridge・Lambda・S3・ログ・分析用権限
+└── incident/           # 停止検知ルールまで作成済み。Lambda・S3・分析用権限は今後追加
 ```
 
 各ディレクトリにProvider・バージョン設定を置き、個別にinit・plan・applyする。同じディレクトリの`.tf`ファイルはまとめて読み込まれるが、隣のディレクトリは自動では読み込まれない。CloudWatch LogsとIAMは、利用するECS・Lambda側で管理する。
