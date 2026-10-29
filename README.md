@@ -2,7 +2,7 @@
 
 ECSタスクの異常停止を検知し、生成AIによる調査レポートを残す検証用プロジェクト。
 
-**現在はTerraformの初期設定とVPC・Subnet・Internet Gateway・ルート設定まで作成済み。AWSへの構築は未実施。** 設計と手順は、まずこのREADMEに集約する。
+**現在はネットワーク・ECSクラスター・Nginx用ロググループのTerraform定義まで作成済み。タスク定義は未実装、AWSへの構築は未実施。** 設計と手順は、まずこのREADMEに集約する。
 
 ## 最初の完成条件
 
@@ -59,6 +59,7 @@ Lambdaは発生時刻、タスクARN、停止理由、コンテナ終了コー�
 - dev環境のみ。Terraformは`network`・`ecs`・`incident`の3つに実行ディレクトリ・Stateを分け、最初は子モジュールを作らない。
 - 1 AZ・Public Subnet 1つ。ALB・NAT Gatewayは作成しない。
 - タスクは検証時だけ起動する。インバウンド通信は禁止する。
+- Nginxのログは`/aii/dev/ecs/nginx`に保存し、保存期間を3日とする。
 - イメージ取得などに必要な通信は、Public IPとInternet Gateway経由で確保する。
 - Lambdaは初期構成ではVPCに接続しない。
 - IAMは最小権限。S3はパブリックアクセスを禁止し、暗号化する。
@@ -68,7 +69,7 @@ Lambdaは発生時刻、タスクARN、停止理由、コンテナ終了コー�
 
 ## Terraformのファイル構成
 
-以下は予定構成。現在は`network/`の初期設定とネットワーク定義を作成済み。他のディレクトリ・ファイルは必要になった段階で追加し、構成が固まってからモジュール化を検討する。
+以下は予定構成。現在は`network/`と`ecs/`の初期設定、ネットワークとECSクラスターの定義を作成済み。他のディレクトリ・ファイルは必要になった段階で追加し、構成が固まってからモジュール化を検討する。
 
 ```text
 environments/dev/
@@ -77,7 +78,7 @@ environments/dev/
 │   ├── providers.tf    # AWS Provider・共通タグ（作成済み）
 │   ├── .terraform.lock.hcl # Providerの使用バージョン（作成済み）
 │   └── network.tf      # VPC・Subnet・Internet Gateway・ルート設定
-├── ecs/                # ECS・タスク定義・ログ・関連する権限
+├── ecs/                # ECSクラスター・ログ（タスク定義・権限は今後追加）
 └── incident/           # EventBridge・Lambda・S3・ログ・分析用権限
 ```
 
