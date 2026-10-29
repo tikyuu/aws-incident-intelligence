@@ -2,7 +2,7 @@
 
 ECSタスクの異常停止を検知し、生成AIによる調査レポートを残す検証用プロジェクト。
 
-**現在はネットワーク・ECSクラスター・Nginx用ロググループ・タスク実行用IAMロールのTerraform定義まで作成済み。タスク定義は未実装、AWSへの構築は未実施。** 設計と手順は、まずこのREADMEに集約する。
+**現在はネットワーク・ECSクラスター・Nginx用ロググループ・タスク実行用IAMロール・正常系タスク定義のTerraform定義まで作成済み。タスク起動時のネットワーク設定・異常系の検証設定は未実装、AWSへの構築は未実施。** 設計と手順は、まずこのREADMEに集約する。
 
 ## 最初の完成条件
 
@@ -59,7 +59,9 @@ Lambdaは発生時刻、タスクARN、停止理由、コンテナ終了コー�
 - dev環境のみ。Terraformは`network`・`ecs`・`incident`の3つに実行ディレクトリ・Stateを分け、最初は子モジュールを作らない。
 - 1 AZ・Public Subnet 1つ。ALB・NAT Gatewayは作成しない。
 - タスクは検証時だけ起動する。インバウンド通信は禁止する。
+- NginxはLinux / X86_64のFargateタスクで、CPU 0.25 vCPU・メモリ512 MiBとする。公式イメージ`nginx:1.30.6`を指定し、ECSサービスは作成しない。
 - Nginxのログは`/aii/dev/ecs/nginx`に保存し、保存期間を3日とする。
+- ログストリーム名は`ecs/nginx/<タスクID>`。ログ送信は`non-blocking`・バッファ10 MiBとし、バッファ超過時はログが欠落し得る。
 - タスク実行用IAMロールは、Nginx用ロググループ内のログストリーム作成・ログ送信のみを許可する。
 - イメージ取得などに必要な通信は、Public IPとInternet Gateway経由で確保する。
 - Lambdaは初期構成ではVPCに接続しない。
@@ -70,7 +72,7 @@ Lambdaは発生時刻、タスクARN、停止理由、コンテナ終了コー�
 
 ## Terraformのファイル構成
 
-以下は予定構成。現在は`network/`と`ecs/`の初期設定、ネットワークとECSクラスターの定義を作成済み。他のディレクトリ・ファイルは必要になった段階で追加し、構成が固まってからモジュール化を検討する。
+以下は予定構成。現在は`network/`と`ecs/`の初期設定、ネットワーク・ECSクラスター・ログ・実行権限・正常系タスク定義を作成済み。他のディレクトリ・ファイルは必要になった段階で追加し、構成が固まってからモジュール化を検討する。
 
 ```text
 environments/dev/
@@ -79,7 +81,7 @@ environments/dev/
 │   ├── providers.tf    # AWS Provider・共通タグ（作成済み）
 │   ├── .terraform.lock.hcl # Providerの使用バージョン（作成済み）
 │   └── network.tf      # VPC・Subnet・Internet Gateway・ルート設定
-├── ecs/                # ECSクラスター・ログ・実行権限（タスク定義は今後追加）
+├── ecs/                # ECSクラスター・ログ・実行権限・正常系タスク定義
 └── incident/           # EventBridge・Lambda・S3・ログ・分析用権限
 ```
 
