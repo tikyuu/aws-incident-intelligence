@@ -1,8 +1,10 @@
-# リージョン・認証情報はAWS CLIの設定や環境変数から取得する。
+# 認証情報はAWS CLIの設定や環境変数から取得する。
 provider "aws" {
+  region = "ap-northeast-1"
+
   default_tags {
     tags = {
-      Project     = "aws-incident-intelligence"
+      Project     = "aii"
       Environment = "dev"
       ManagedBy   = "Terraform"
     }

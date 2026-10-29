@@ -2,7 +2,7 @@
 
 ECSタスクの異常停止を検知し、生成AIによる調査レポートを残す検証用プロジェクト。
 
-**現在はTerraformのバージョン条件・Provider設定まで作成済み。AWSへの構築は未実施。** 設計と手順は、まずこのREADMEに集約する。
+**現在はTerraformの初期設定とVPC・Subnet・Internet Gateway・ルート設定まで作成済み。AWSへの構築は未実施。** 設計と手順は、まずこのREADMEに集約する。
 
 ## 最初の完成条件
 
@@ -10,20 +10,11 @@ Nginxの設定を意図的に間違えてECSタスクを異常停止させ、停
 
 ## 構成と役割
 
-```text
-ECS Fargate（Nginx）── ログ ──→ CloudWatch Logs
-        │
-        ↓ タスク停止イベント
-EventBridge（対象クラスターのSTOPPEDのみ）
-        │
-        ↓
-Lambda ── 停止情報・ログを収集 ← ECS / CloudWatch
-        │
-        ├─ 必要な情報を送信 → Bedrock（Converse API）
-        │                  ← 原因候補・根拠・対応方法
-        │
-        └─ レポートを保存 → S3（JSON / Markdown）
-```
+![AWS Incident Intelligenceの完成予定アーキテクチャ](docs/architecture.png)
+
+[draw.ioで編集するファイル](docs/architecture.drawio)をダウンロードし、draw.ioで開けます。図は完成予定の全体構成です。
+
+アイコンは[AWS公式配布ページ](https://aws.amazon.com/architecture/icons/)で2026年10月29日に確認した現行版（2026年7月31日版）を使用しています。
 
 | サービス・道具 | 担当 |
 | --- | --- |
@@ -73,9 +64,11 @@ Lambdaは発生時刻、タスクARN、停止理由、コンテナ終了コー�
 - IAMは最小権限。S3はパブリックアクセスを禁止し、暗号化する。
 - 認証情報・Terraform State・機密値はGitに含めない。
 
+命名は`aii-環境-用途`を基本とする（例：`aii-dev-vpc`）。`aii`はAWS Incident Intelligenceの略称。共通タグは`Project = aii`、`Environment = dev`、`ManagedBy = Terraform`に統一する。S3など名前の一意性が必要なリソースには識別子を追加する。
+
 ## Terraformのファイル構成
 
-以下は予定構成。現在は`network/`の初期設定のみ作成済み。他のディレクトリ・ファイルは必要になった段階で追加し、構成が固まってからモジュール化を検討する。
+以下は予定構成。現在は`network/`の初期設定とネットワーク定義を作成済み。他のディレクトリ・ファイルは必要になった段階で追加し、構成が固まってからモジュール化を検討する。
 
 ```text
 environments/dev/
@@ -83,7 +76,7 @@ environments/dev/
 │   ├── versions.tf     # バージョン条件・ローカルState設定（作成済み）
 │   ├── providers.tf    # AWS Provider・共通タグ（作成済み）
 │   ├── .terraform.lock.hcl # Providerの使用バージョン（作成済み）
-│   └── network.tf      # ネットワーク定義（今後追加）
+│   └── network.tf      # VPC・Subnet・Internet Gateway・ルート設定
 ├── ecs/                # ECS・タスク定義・ログ・関連する権限
 └── incident/           # EventBridge・Lambda・S3・ログ・分析用権限
 ```
