@@ -35,3 +35,16 @@ resource "aws_lambda_function" "incident" {
     aws_iam_role_policy.lambda_read_nginx_logs,
   ]
 }
+
+data "aws_caller_identity" "current" {}
+
+resource "aws_lambda_permission" "memory_alarm" {
+  statement_id  = "AllowExecutionFromEcsMemoryAlarm"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.incident.function_name
+  principal     = "lambda.alarms.cloudwatch.amazonaws.com"
+
+  # このアカウントの、今回作るメモリアラームだけに許可する。
+  source_account = data.aws_caller_identity.current.account_id
+  source_arn     = aws_cloudwatch_metric_alarm.ecs_memory_high.arn
+}

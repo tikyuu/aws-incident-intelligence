@@ -2,7 +2,7 @@
 
 ECSのメモリ使用率が高い状態をCloudWatch Alarmで検知し、生成AIによる調査レポートを残す検証用プロジェクト。
 
-**現在はネットワーク・ECSクラスター・単発Nginxタスク定義・Security Group・ECSとLambdaのログ・IAM権限・停止イベント受信用Lambda・Nginxログ取得処理を作成済み。旧構成のEventBridge停止検知ルール・ターゲット・Lambda呼び出し許可は削除済み。ECSサービス・メモリアラーム・アラームからLambdaへの直接呼び出し・メトリクス収集・Bedrock連携・S3は未実装。Lambdaはまだ停止イベント形式の処理であり、現在は自動起動する経路がない。AWSへの構築は未実施。** 設計と手順は、まずこのREADMEに集約する。
+**現在はネットワーク・ECSクラスター・Nginxタスク定義・ECSサービス・Security Group・ECSとLambdaのログ・IAM権限・停止イベント受信用Lambda・Nginxログ取得処理を作成済み。旧構成のEventBridge停止検知ルール・ターゲット・Lambda呼び出し許可は削除済み。メモリアラームとCloudWatchからのLambda呼び出し許可も定義済み。Lambdaはまだ停止イベント形式の処理のため、アラームの呼び出しアクションは無効。アラーム受信対応・メトリクス収集・Bedrock連携・S3は未実装。AWSへの構築は未実施。** 設計と手順は、まずこのREADMEに集約する。
 
 ## 最初の完成条件
 
@@ -10,13 +10,13 @@ ECSサービスのメモリ使用率が高い状態が続いたらCloudWatch Ala
 
 基本の流れは「ECSサービス → CloudWatchのメモリメトリクス → CloudWatch Alarm → Lambda → Bedrock → S3」。関連ログはCloudWatch LogsからLambdaが取得する。
 
-ECSサービスで検証用タスクを1個動かす方針。メモリはまずサービス単位の`AWS/ECS`の`MemoryUtilization`を監視する。しきい値・統計・評価期間・欠損データの扱い、メモリ使用量を意図的に増やす検証方法は、一つずつ説明してから決める。Nginx単体への通信で十分なメモリ増加が起きるとは限らないため、検証用アプリや負荷生成方法も検討する。
+ECSサービスで検証用タスクを1個動かす方針。クラスター名は`aii-dev-ecs-cluster`、サービス名は`aii-dev-ecs-service-nginx`とする。メモリはまずサービス単位の`AWS/ECS`の`MemoryUtilization`を監視する。条件は1分間の平均が80%を超えた場合に1回で発報、欠損データはデータ不足とする。メモリ使用量を意図的に増やす検証方法は別途整備する。Nginx単体への通信で十分なメモリ増加が起きるとは限らないため、検証用アプリや負荷生成方法も検討する。
 
 CloudWatch Alarmの`ALARM`状態への遷移時のアクションにLambdaを設定する。Lambda側には対象アラームARNとアカウントに限定した呼び出し許可を定義する。直接呼び出しでは停止イベントと通知形式が異なるため、ハンドラーも対応させる。ALARMが継続している間に定期実行する設計ではない。[AWS公式の直接呼び出し仕様](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/alarms-and-actions-Lambda.html)に従う。
 
 高いメモリ使用率だけで、停止の予兆やメモリリークと断定しない。レポートでは観測した事実と原因候補を分け、ログやメトリクスで確認できないことは不足として記録する。
 
-現在のコードは単発タスクと停止イベントを前提としており、ECSサービス・メモリアラーム・アラームからLambdaへの直接呼び出し設定と許可・メトリクス収集・アラーム対象からタスクとログを特定する処理は未実装。旧構成の停止検知ルール・ターゲット・Lambda呼び出し許可と、不要になったincident側の`ecs_cluster_arn`入力変数は削除済み。ログ収集は流用できる部分を活用する。起動失敗の分析は最初の完成条件から外す。
+ECSサービスのTerraform定義は作成済み。Lambdaは停止イベントを前提としており、メモリアラームと直接呼び出し設定・許可は定義済みだが、呼び出しアクションは無効。アラーム受信・メトリクス収集・アラーム対象からタスクとログを特定する処理は未実装。旧構成の停止検知ルール・ターゲット・Lambda呼び出し許可と、不要になったincident側の`ecs_cluster_arn`入力変数は削除済み。ログ収集は流用できる部分を活用する。起動失敗の分析は最初の完成条件から外す。
 
 ユーザーはメモリ監視を優先し、必要なコストを許容する方針。AWS構築前には、具体的な構成の概算費用と停止・削除手順を確認する。コスト許容の表明をAWSへの構築実行の承認とは扱わない。
 
@@ -44,7 +44,23 @@ CloudWatch Alarmの`ALARM`状態への遷移時のアクションにLambdaを設
 
 指定したメモリアラームが`ALARM`状態へ変わったときにLambdaを直接呼び出す設計。重複配信・再発・回復時の扱いは、アラームと受信処理の実装時に決める。
 
-従来のEventBridgeによるタスク停止検知ルール、Lambdaターゲット、EventBridgeからの呼び出し許可は削除済み。CloudWatch Alarm本体とCloudWatchからの呼び出し許可は、対象アラームの定義と合わせて追加する。
+従来のEventBridgeによるタスク停止検知ルール、Lambdaターゲット、EventBridgeからの呼び出し許可は削除済み。CloudWatch Alarm本体を`incident/alarms.tf`、CloudWatchからの呼び出し許可を`incident/lambda.tf`に定義済み。対象のアラームARNとアカウントで許可範囲を限定する。
+
+メモリアラーム`aii-dev-ecs-memory-high`は次の条件で定義済み。
+
+| 項目 | 設定 |
+| --- | --- |
+| メトリクス | `AWS/ECS`の`MemoryUtilization` |
+| 監視対象 | 入力変数`ecs_cluster_name`・`ecs_service_name`で指定 |
+| 集計 | `Average`、60秒 |
+| しきい値 | `GreaterThanThreshold`、80（80%ちょうどは超過に含めない） |
+| 発報 | 評価期間1、超過データポイント1 |
+| 欠損 | `missing`。評価対象がすべて欠損したら`INSUFFICIENT_DATA` |
+| 呼び出し | `ALARM`への遷移時にLambda。回復・データ不足時のアクションはなし |
+
+メトリクスの到着・評価タイミングにより、負荷を与えてから正確に60秒後に検知するとは限らない。アラームがALARMのままでも繰り返し呼び出す設計ではない。
+
+**現在は`actions_enabled = false`**。AWSへ構築した場合、アラームの評価は行われるがLambdaは呼び出されない。ハンドラーをアラーム形式に対応させる段階で有効化する。
 
 既存のPython処理は停止イベント向けのログ収集として残しているが、そのままではアラーム通知を扱えない。今後、アラーム形式の受信と対象サービスのタスク特定に対応させる。
 
@@ -77,6 +93,7 @@ Lambdaはアラーム名・状態変化の時刻・判定条件・対象クラ�
 .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python -m unittest discover -s tests -v
 terraform fmt -check -recursive
+terraform -chdir=environments/dev/ecs validate
 terraform -chdir=environments/dev/incident validate
 ```
 
@@ -84,9 +101,9 @@ terraform -chdir=environments/dev/incident validate
 
 - dev環境のみ。Terraformは`network`・`ecs`・`incident`の3つに実行ディレクトリ・Stateを分け、最初は子モジュールを作らない。
 - 1 AZ・Public Subnet 1つ。ALB・NAT Gatewayは作成しない。
-- ECSサービスでタスク1個を継続稼働させてメモリを監視する方針（未実装）。検証を終える際のサービス停止・削除手順も整備する。インバウンド通信は禁止する。
+- ECSサービス`aii-dev-ecs-service-nginx`の定義を作成済み。既存クラスター`aii-dev-ecs-cluster`とNginxタスク定義を参照し、Fargateで`desired_count = 1`を維持する。更新時の最小稼働率100%・最大200%とし、入れ替え中は最大2個が動く。オートスケーリング・ALBは追加しない。検証を終える際のサービス停止・削除手順は今後整備する。インバウンド通信は禁止する。
 - タスク用Security GroupはECS側で管理し、`vpc_id`入力変数で作成先を指定する。受信ルールは作成せず、送信は`0.0.0.0/0`宛てのTCP 443（HTTPS）のみ許可する。
-- NginxはLinux / X86_64のFargateタスクで、CPU 0.25 vCPU・メモリ512 MiBとする。現在の単発タスク定義は公式イメージ`nginx:1.30.6`を指定している。ECSサービスは今後追加し、メモリ増加を再現するためのアプリ・構成は別途決める。
+- NginxはLinux / X86_64のFargateタスクで、CPU 0.25 vCPU・メモリ512 MiBとする。タスク定義は公式イメージ`nginx:1.30.6`を指定し、ECSサービスから参照する。メモリ増加を再現するためのアプリ・構成は別途決める。
 - Nginxのログは`/aii/dev/ecs/nginx`に保存し、保存期間を3日とする。
 - ログストリーム名は`ecs/nginx/<タスクID>`。ログ送信は`non-blocking`・バッファ10 MiBとし、バッファ超過時はログが欠落し得る。
 - タスク実行用IAMロールは、Nginx用ロググループ内のログストリーム作成・ログ送信のみを許可する。
@@ -101,7 +118,7 @@ terraform -chdir=environments/dev/incident validate
 
 ## Terraformのファイル構成
 
-以下は予定構成。現在は`network/`と`ecs/`の初期設定、ネットワーク・ECSクラスター・ログ・実行権限・正常系タスク定義を作成済み。他のディレクトリ・ファイルは必要になった段階で追加し、構成が固まってからモジュール化を検討する。
+以下は予定構成。現在は`network/`と`ecs/`の初期設定、ネットワーク・ECSクラスター・ログ・実行権限・正常系タスク定義・ECSサービスを作成済み。他のディレクトリ・ファイルは必要になった段階で追加し、構成が固まってからモジュール化を検討する。
 
 ```text
 environments/dev/
@@ -110,8 +127,8 @@ environments/dev/
 │   ├── providers.tf    # AWS Provider・共通タグ（作成済み）
 │   ├── .terraform.lock.hcl # Providerの使用バージョン（作成済み）
 │   └── network.tf      # VPC・Subnet・Internet Gateway・ルート設定
-├── ecs/                # ECSクラスター・ログ・実行権限・正常系タスク定義・Security Group
-└── incident/           # Lambda・ログ・IAM・停止イベント向けログ取得処理を作成済み。アラーム・直接呼び出し・メトリクス収集・Bedrock・S3は今後追加
+├── ecs/                # ECSクラスター・サービス・ログ・実行権限・タスク定義・Security Group
+└── incident/           # Lambda・ログ・IAM・停止イベント向けログ取得処理を作成済み。アラームと呼び出し許可は定義済み（アクション無効）。受信対応・メトリクス収集・Bedrock・S3は今後追加
 ```
 
 各ディレクトリにProvider・バージョン設定を置き、個別にinit・plan・applyする。同じディレクトリの`.tf`ファイルはまとめて読み込まれるが、隣のディレクトリは自動では読み込まれない。CloudWatch LogsとIAMは、利用するECS・Lambda側で管理する。
@@ -123,6 +140,8 @@ environments/dev/
 Stateは各ディレクトリの`terraform.tfstate`にローカル保存する（例：`environments/dev/network/terraform.tfstate`）。Gitには含めず、AWS構築後は変更・削除に備えて保管する。各ディレクトリの`.terraform.lock.hcl`はGit管理する。
 
 ディレクトリ間で必要なSubnet ID・ARNなどは、作成元のoutputから利用側の入力へ渡す。具体的な受け渡し方法は実装時に決める。作成は依存先から、削除は利用側から行う。Stateを分けるため、全体の実行順序はTerraformが自動調整しない。
+
+network側の`vpc_id`・`public_subnet_id`出力を、ecs側の同名の入力変数へ渡す。サービスはPublic Subnetにタスクを配置し、Public IPを付与して既存Security Groupを使う。ECS側の`cluster_name`・`service_name`出力をincident側の`ecs_cluster_name`・`ecs_service_name`入力へ渡し、メモリアラームの対象指定に利用する。いずれもディレクトリ間で自動接続はされない。
 
 ECS側の`nginx_log_group_arn`出力と、incident側の同名の入力変数を定義済み。ECS側の出力値をincident側の入力へ渡す。変数を定義しただけでは自動接続されず、具体的な受け渡し手順は今後追加する。Lambda実行ロールの読み取りポリシーは、この入力変数を対象ARNとして参照する。
 

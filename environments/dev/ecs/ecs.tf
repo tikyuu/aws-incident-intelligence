@@ -1,5 +1,5 @@
 resource "aws_ecs_cluster" "main" {
-  name = "aii-dev-cluster"
+  name = "aii-dev-ecs-cluster"
 
   # 初期版は低コストを優先し、Container Insightsを無効にする。
   setting {
