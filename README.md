@@ -22,11 +22,13 @@ ECSサービスのTerraform定義は作成済み。Lambdaはアラームの受�
 
 ## 構成と役割
 
-![AWS Incident Intelligenceの完成予定アーキテクチャ](docs/architecture.png)
+![メモリアラームからAI調査とレポート保存までの完成予定構成](docs/architecture.png)
 
-[draw.ioで編集するファイル](docs/architecture.drawio)をダウンロードし、draw.ioで開けます。図は旧来の停止イベント中心の構成です。メモリアラームを起点とする構成への更新は今後行います。
+[draw.ioで編集するファイル](docs/architecture.drawio)・[拡大表示用SVG](docs/architecture.svg)もあります。図はメモリアラームを起点にした完成予定構成です。東京のVPCとマネージドサービス、米国東部のモデル呼び出し先を分け、基本の観測・通知経路を実線、計画中のAI調査・保存経路を点線で示しています。各カードに実装状況を表示しており、AWS上での稼働確認済みを意味しません。Gateway連携とエージェント実行方式は設計段階です。
 
-アイコンは[AWS公式配布ページ](https://aws.amazon.com/architecture/icons/)で2026年10月29日に確認した現行版（2026年7月31日版）を使用しています。
+CloudWatchは1つの枠にまとめ、その中にAlarmとLogs / Metricsを表示しています。AgentCore Runtimeはエージェントを動かす場所、AgentCore Gatewayは調査APIへの窓口として、箱の見出しで区別しています。
+
+アイコンは[AWS公式配布ページ](https://aws.amazon.com/architecture/icons/)で2026年10月31日に確認した現行版（2026年7月31日版）を使用しています。RuntimeとGatewayには、共通のAgentCoreサービスアイコンを使用しています。
 
 | サービス・道具 | 担当 |
 | --- | --- |
