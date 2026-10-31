@@ -1,53 +1,58 @@
 # AWS Incident Intelligence
 
-ECSタスクの異常停止を検知し、生成AIによる調査レポートを残す検証用プロジェクト。
+ECSのメモリ使用率が高い状態をCloudWatch Alarmで検知し、生成AIによる調査レポートを残す検証用プロジェクト。
 
-**現在はネットワーク・ECSクラスター・Nginx用ロググループ・タスク実行用IAMロール・正常系タスク定義・タスク用Security Group・停止検知用EventBridgeルール・Lambda実行用IAMロールとログ送信・Nginxログ読み取り権限・Lambda用ロググループ・受信確認用Lambda本体・EventBridgeのLambdaターゲットと呼び出し許可のTerraform定義とPython処理まで作成済み。ECSログ取得のPython処理も作成済み。正常・異常の分類・Bedrock連携・S3は未実装。タスク起動手順と異常系の検証設定は未整備。AWSへの構築は未実施。** 設計と手順は、まずこのREADMEに集約する。
+**現在はネットワーク・ECSクラスター・単発Nginxタスク定義・Security Group・ECSとLambdaのログ・IAM権限・停止イベント受信用Lambda・Nginxログ取得処理を作成済み。旧構成のEventBridge停止検知ルール・ターゲット・Lambda呼び出し許可は削除済み。ECSサービス・メモリアラーム・アラームからLambdaへの直接呼び出し・メトリクス収集・Bedrock連携・S3は未実装。Lambdaはまだ停止イベント形式の処理であり、現在は自動起動する経路がない。AWSへの構築は未実施。** 設計と手順は、まずこのREADMEに集約する。
 
 ## 最初の完成条件
 
-Nginxの設定を意図的に間違えてECSタスクを異常停止させ、停止情報とログをBedrockで分析し、JSON・MarkdownのレポートをS3に保存できること。
+ECSサービスのメモリ使用率が高い状態が続いたらCloudWatch Alarmで検知し、Lambdaがメモリの推移と関連ログを収集してBedrockへ渡し、原因候補・根拠・追加の確認事項を含むJSON・MarkdownのレポートをS3に保存できること。タスクが停止する前でも調査を開始する。
+
+基本の流れは「ECSサービス → CloudWatchのメモリメトリクス → CloudWatch Alarm → Lambda → Bedrock → S3」。関連ログはCloudWatch LogsからLambdaが取得する。
+
+ECSサービスで検証用タスクを1個動かす方針。メモリはまずサービス単位の`AWS/ECS`の`MemoryUtilization`を監視する。しきい値・統計・評価期間・欠損データの扱い、メモリ使用量を意図的に増やす検証方法は、一つずつ説明してから決める。Nginx単体への通信で十分なメモリ増加が起きるとは限らないため、検証用アプリや負荷生成方法も検討する。
+
+CloudWatch Alarmの`ALARM`状態への遷移時のアクションにLambdaを設定する。Lambda側には対象アラームARNとアカウントに限定した呼び出し許可を定義する。直接呼び出しでは停止イベントと通知形式が異なるため、ハンドラーも対応させる。ALARMが継続している間に定期実行する設計ではない。[AWS公式の直接呼び出し仕様](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/alarms-and-actions-Lambda.html)に従う。
+
+高いメモリ使用率だけで、停止の予兆やメモリリークと断定しない。レポートでは観測した事実と原因候補を分け、ログやメトリクスで確認できないことは不足として記録する。
+
+現在のコードは単発タスクと停止イベントを前提としており、ECSサービス・メモリアラーム・アラームからLambdaへの直接呼び出し設定と許可・メトリクス収集・アラーム対象からタスクとログを特定する処理は未実装。旧構成の停止検知ルール・ターゲット・Lambda呼び出し許可と、不要になったincident側の`ecs_cluster_arn`入力変数は削除済み。ログ収集は流用できる部分を活用する。起動失敗の分析は最初の完成条件から外す。
+
+ユーザーはメモリ監視を優先し、必要なコストを許容する方針。AWS構築前には、具体的な構成の概算費用と停止・削除手順を確認する。コスト許容の表明をAWSへの構築実行の承認とは扱わない。
 
 ## 構成と役割
 
 ![AWS Incident Intelligenceの完成予定アーキテクチャ](docs/architecture.png)
 
-[draw.ioで編集するファイル](docs/architecture.drawio)をダウンロードし、draw.ioで開けます。図は完成予定の全体構成です。
+[draw.ioで編集するファイル](docs/architecture.drawio)をダウンロードし、draw.ioで開けます。図は旧来の停止イベント中心の構成です。メモリアラームを起点とする構成への更新は今後行います。
 
 アイコンは[AWS公式配布ページ](https://aws.amazon.com/architecture/icons/)で2026年10月29日に確認した現行版（2026年7月31日版）を使用しています。
 
 | サービス・道具 | 担当 |
 | --- | --- |
-| ECS Fargate | 検証対象のNginxコンテナを実行する |
-| EventBridge | タスク停止イベントを受け取り、Lambdaを起動する |
-| CloudWatch | ログを保管する。取得可能なメトリクスも調査材料にする |
-| Lambda | 停止の分類、証拠収集、Bedrockへの依頼、結果の保存を行う |
+| ECS Fargate | ECSサービスで監視対象のコンテナを実行する |
+| EventBridge | 今回は使用しない。旧構成の停止検知用定義は削除済み |
+| CloudWatch | メモリメトリクスを監視し、アラームからLambdaを直接呼び出す。CloudWatch Logsで関連ログを保管する |
+| Lambda | アラーム対象の特定、証拠収集、Bedrockへの依頼、結果の保存を行う |
 | Bedrock | 渡された証拠から原因候補と対応方法を生成する |
 | S3 | 障害ごとのレポートをファイルとして残す |
 | Terraform | 上記のAWSリソースをコードで作成・削除する |
 
 分析処理はECS上で動かさず、Lambdaに分離する。最初はDynamoDBやAIエージェントを追加しない。
 
-## 正常停止と異常停止
+## アラームを起点とする呼び出し
 
-EventBridgeは停止を検知し、Lambdaが停止理由・終了コード・タスクの用途を組み合わせて分類する。
+指定したメモリアラームが`ALARM`状態へ変わったときにLambdaを直接呼び出す設計。重複配信・再発・回復時の扱いは、アラームと受信処理の実装時に決める。
 
-EventBridgeルールはデフォルトイベントバス上で、`source = aws.ecs`・`detail-type = ECS Task State Change`・`detail.lastStatus = STOPPED`に一致し、`detail.clusterArn`が対象クラスターARNのイベントを拾う。ECS側の`cluster_arn`出力をincident側の`ecs_cluster_arn`入力変数へ渡す。ターゲットに`aii-dev-incident`のLambdaを指定済み。Lambda側の呼び出し許可（`aws_lambda_permission`）も定義し、呼び出し元を今回のルールARNに限定する。ターゲットは呼び出し許可の設定後に登録する。AWSへ構築後に、停止イベントの受信とログ出力を検証する。
+従来のEventBridgeによるタスク停止検知ルール、Lambdaターゲット、EventBridgeからの呼び出し許可は削除済み。CloudWatch Alarm本体とCloudWatchからの呼び出し許可は、対象アラームの定義と合わせて追加する。
 
-| ケース | 扱い |
-| --- | --- |
-| 意図した手動停止・通常のサービス停止 | 異常として分析しない |
-| 正常終了する検証タスク | 異常として分析しない |
-| Nginxの設定エラーによる異常終了 | Bedrockによる分析の対象 |
-| 情報が足りず分類できない停止 | 判定保留として記録する |
-
-終了コードだけで正常・異常や原因を断定しない。同じ停止イベントが再配信される前提で、重複を識別し、再実行時の扱いを実装時に決める。
+既存のPython処理は停止イベント向けのログ収集として残しているが、そのままではアラーム通知を扱えない。今後、アラーム形式の受信と対象サービスのタスク特定に対応させる。
 
 ## 分析に渡す情報とレポート
 
-Lambdaは発生時刻、タスクARN、停止理由、コンテナ終了コード、関連ログを収集する。CPU・メモリは取得可能な場合に添付し、取得できない情報は理由付きで「取得不可」とする。
+Lambdaはアラーム名・状態変化の時刻・判定条件・対象クラスターとサービス、メモリ使用率の時系列、関連するタスクとログを収集する設計とする。現在のハンドラーは停止イベント専用のため、アラームの受信と対象タスクの特定、メトリクス取得、必要なIAM権限を今後追加する。
 
-単発タスクのCPU・メモリ取得には追加の監視設計が必要なため、最初の完成条件には含めない。
+メモリ使用率の推移を最初の完成条件に含める。CPUなど追加の情報をどこまで収集するかは別途決める。取得失敗時には不足と理由を明示し、メモリの値だけで原因を断定しない。
 
 - ログの時間範囲・件数・文字数を制限し、認証情報などを除外してからBedrockへ送る。
 - ログやイベントは信頼できない入力として扱い、内部の指示文に従わせない。
@@ -79,9 +84,9 @@ terraform -chdir=environments/dev/incident validate
 
 - dev環境のみ。Terraformは`network`・`ecs`・`incident`の3つに実行ディレクトリ・Stateを分け、最初は子モジュールを作らない。
 - 1 AZ・Public Subnet 1つ。ALB・NAT Gatewayは作成しない。
-- タスクは検証時だけ起動する。インバウンド通信は禁止する。
+- ECSサービスでタスク1個を継続稼働させてメモリを監視する方針（未実装）。検証を終える際のサービス停止・削除手順も整備する。インバウンド通信は禁止する。
 - タスク用Security GroupはECS側で管理し、`vpc_id`入力変数で作成先を指定する。受信ルールは作成せず、送信は`0.0.0.0/0`宛てのTCP 443（HTTPS）のみ許可する。
-- NginxはLinux / X86_64のFargateタスクで、CPU 0.25 vCPU・メモリ512 MiBとする。公式イメージ`nginx:1.30.6`を指定し、ECSサービスは作成しない。
+- NginxはLinux / X86_64のFargateタスクで、CPU 0.25 vCPU・メモリ512 MiBとする。現在の単発タスク定義は公式イメージ`nginx:1.30.6`を指定している。ECSサービスは今後追加し、メモリ増加を再現するためのアプリ・構成は別途決める。
 - Nginxのログは`/aii/dev/ecs/nginx`に保存し、保存期間を3日とする。
 - ログストリーム名は`ecs/nginx/<タスクID>`。ログ送信は`non-blocking`・バッファ10 MiBとし、バッファ超過時はログが欠落し得る。
 - タスク実行用IAMロールは、Nginx用ロググループ内のログストリーム作成・ログ送信のみを許可する。
@@ -106,14 +111,14 @@ environments/dev/
 │   ├── .terraform.lock.hcl # Providerの使用バージョン（作成済み）
 │   └── network.tf      # VPC・Subnet・Internet Gateway・ルート設定
 ├── ecs/                # ECSクラスター・ログ・実行権限・正常系タスク定義・Security Group
-└── incident/           # 停止検知ルール・Lambda実行ロールとログ送信・Nginxログ読み取り権限・Lambda用ロググループ・受信確認用Lambda・EventBridgeターゲットと呼び出し許可まで作成済み。S3・分析用権限は今後追加
+└── incident/           # Lambda・ログ・IAM・停止イベント向けログ取得処理を作成済み。アラーム・直接呼び出し・メトリクス収集・Bedrock・S3は今後追加
 ```
 
 各ディレクトリにProvider・バージョン設定を置き、個別にinit・plan・applyする。同じディレクトリの`.tf`ファイルはまとめて読み込まれるが、隣のディレクトリは自動では読み込まれない。CloudWatch LogsとIAMは、利用するECS・Lambda側で管理する。
 
 `incident/lambda/handler.py`がLambdaの処理本体。Archive Providerで`incident/build/incident-lambda.zip`にまとめ、コードのハッシュで変更を検知する。`build/`はGit管理対象外。ZIPはplan時に生成されるため、保存したplanをapplyする際はZIPも保持する。
 
-ネットワーク、検証タスク、障害分析という変更目的で分ける。`incident/`内は`eventbridge.tf`・`lambda.tf`・`s3.tf`などに整理し、分析機能としてまとめて管理する。
+ネットワーク、検証タスク、障害分析という変更目的で分ける。`incident/`内は`cloudwatch.tf`・`lambda.tf`・`s3.tf`などに整理し、分析機能としてまとめて管理する。
 
 Stateは各ディレクトリの`terraform.tfstate`にローカル保存する（例：`environments/dev/network/terraform.tfstate`）。Gitには含めず、AWS構築後は変更・削除に備えて保管する。各ディレクトリの`.terraform.lock.hcl`はGit管理する。
 
@@ -128,16 +133,16 @@ ECS側の`nginx_log_group_arn`出力と、incident側の同名の入力変数を
 ## 進め方
 
 1. この設計を確認する。
-2. ECS基盤 → EventBridge → Lambda → Bedrock → S3の順にコードを作成する。
+2. ECSサービス → メモリ監視・CloudWatch AlarmからLambdaへの直接呼び出し → Lambdaの証拠収集 → Bedrock → S3の順に、一つずつ説明してコードを作成する。
 3. Terraformのfmt / validate、Pythonの単体テストでローカル検証する。
 4. リソース一覧・概算費用・State管理・削除手順を確認する。
-5. 承認後にAWSへ構築し、正常停止・異常停止・重複・ログ取得失敗・Bedrock失敗を検証する。
+5. 承認後にAWSへ構築し、通常時・継続したメモリ使用率の上昇によるアラーム・回復・重複配信・ログやメトリクスの取得失敗・Bedrock失敗を検証する。
 
 **各段階の内容を説明し、了承を得てから次に進む。課金・リソース変更を伴うAWS操作は事前確認を必須とする。**
 
 ## 初期版の対象外
 
-フロントエンド、独自Web API、メール・Slack通知、自動復旧、GitHub Actions、停止を伴わない応答遅延・HTTPエラーの検知。
+フロントエンド、独自Web API、メール・Slack通知、自動復旧、GitHub Actions、起動失敗・停止イベントを起点としたAI分析、応答遅延・HTTPエラーを起点とした検知。
 
 ## 参考：AWS公式
 

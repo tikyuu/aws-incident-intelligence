@@ -35,13 +35,3 @@ resource "aws_lambda_function" "incident" {
     aws_iam_role_policy.lambda_read_nginx_logs,
   ]
 }
-
-resource "aws_lambda_permission" "eventbridge" {
-  statement_id  = "AllowExecutionFromEcsTaskStoppedRule"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.incident.function_name
-  principal     = "events.amazonaws.com"
-
-  # 今回の停止検知ルールからの呼び出しだけを許可する。
-  source_arn = aws_cloudwatch_event_rule.ecs_task_stopped.arn
-}
