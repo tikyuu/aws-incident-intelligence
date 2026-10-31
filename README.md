@@ -38,7 +38,7 @@ ECSサービスのTerraform定義は作成済み。Lambdaはアラームの受�
 | S3 | 障害ごとのレポートをファイルとして残す |
 | Terraform | 上記のAWSリソースをコードで作成・削除する |
 
-分析処理はECS上で動かさず、Lambdaに分離する。最初はDynamoDBやAIエージェントを追加しない。
+監視対象のECSタスクとは別に調査エージェントを動かす。Lambdaをアラーム通知の入口とし、エージェントに調査を依頼する。エージェントのAgentCore RuntimeのTerraform定義は作成済みだが、実行用ロールとプログラムは未実装。DynamoDBは初期構成に追加しない。
 
 ## アラームを起点とする呼び出し
 
@@ -74,7 +74,7 @@ Lambdaはアラーム名・状態変化の時刻・判定条件・対象クラ�
 
 - ログの時間範囲・件数・文字数を制限し、認証情報などを除外してからBedrockへ送る。
 - ログやイベントは信頼できない入力として扱い、内部の指示文に従わせない。
-- BedrockのモデルIDまたは推論プロファイルと、呼び出し先リージョンを設定で変更可能にする。
+- BedrockのモデルIDと呼び出し先リージョンは、1環境用の固定値としてTerraformに直接記述し、実行プログラムへ環境変数で渡す。
 - レポートは「概要・確認できた事実・原因候補と根拠・追加調査項目・推奨対応」を分ける。
 - インシデントID、発生時刻、対象リソース、使用モデル、トークン使用量も記録する。
 - ログ取得失敗時は不足を明示する。Bedrock失敗時も、収集済み証拠と失敗理由をLambdaからS3へ残す。
@@ -137,7 +137,15 @@ environments/dev/
 
 `incident/lambda/handler.py`がLambdaの処理本体。Archive Providerで`incident/build/incident-lambda.zip`にまとめ、コードのハッシュで変更を検知する。`build/`はGit管理対象外。ZIPはplan時に生成されるため、保存したplanをapplyする際はZIPも保持する。
 
-ネットワーク、検証タスク、障害分析という変更目的で分ける。`incident/`内は`cloudwatch.tf`・`lambda.tf`・`s3.tf`などに整理し、分析機能としてまとめて管理する。
+ネットワーク、検証タスク、障害分析という変更目的で分ける。`incident/`内は`cloudwatch.tf`・`lambda.tf`・`bedrock.tf`・`s3.tf`などに整理し、分析機能としてまとめて管理する。
+
+`incident/bedrock.tf`に`aws_bedrockagentcore_agent_runtime.incident`を定義済み。1環境で進めるため、名前・モデル・接続先は`bedrock.tf`へ直接記述する。dev/prod用の変数ファイルは追加しない。リソース間の接続に必要な入力・参照は残す。AgentCoreの命名制約に合わせ、名前は`aii_dev_bedrock_agent`とする。採用モデルはGPT-6.1 Sol（`openai.gpt-6.1-sol`）、モデルの呼び出し先はBedrock Mantleの`us-east-1`を初期設定とする。AgentCore自体は既存Providerの東京リージョンに定義する。[AWS公式モデル資料](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-1-sol.html)で提供状況を確認済みだが、利用アカウントでのアクセス可否は未確認。
+
+`bedrock_agent_role_arn`と`bedrock_agent_image_uri`はデフォルト値のない必須入力。実行用IAMロール・ECRイメージ・調査プログラムはまだ作成しておらず、applyの準備は未完了。これらを今後実装して接続する。プログラムはAgentCoreの実行要件に対応し、`MODEL_ID`と`BEDROCK_REGION`を読んでモデルを呼ぶ必要がある。環境変数を指定するだけでAIが動くわけではない。Runtimeのネットワークは`PUBLIC`で、JWT認証を設定せずIAM認証を使用する。LambdaからRuntimeを呼ぶ権限・処理も今後追加する。
+
+旧方式の`aws_bedrockagent_agent`は使わない。[Agents Classicは新規利用の受付を終了](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-classic-maintenance-mode.html)しているため、AgentCore Runtimeを採用する。
+
+入口のLambdaがアラーム情報を渡して調査を依頼し、エージェントが必要に応じて取得用ツールを呼ぶ方式とする。指示文だけで変更操作を禁止するのではなく、取得用ツールとそのIAM権限にも設定変更・再起動・停止の機能を与えない。調査結果では、確認できた事実・根拠・不明点と、優先順位を付けた対策案・想定効果・影響・確認方法を日本語でまとめる。既存のログ取得関数は今後ツール用に再利用するかを検討する。
 
 Stateは各ディレクトリの`terraform.tfstate`にローカル保存する（例：`environments/dev/network/terraform.tfstate`）。Gitには含めず、AWS構築後は変更・削除に備えて保管する。各ディレクトリの`.terraform.lock.hcl`はGit管理する。
 
@@ -149,7 +157,7 @@ ECS側の`nginx_log_group_arn`出力と、incident側の同名の入力変数を
 
 全体の構築順は`network` → `ecs` → `incident`、削除順はその逆とする。後からモジュール化する際は、既存Stateを維持し、`moved`ブロックなどでリソースのアドレス変更に対応する。
 
-初期版はNginx公式イメージを利用するため、専用のECRリポジトリは作成しない。
+初期版はNginx公式イメージを利用するため、監視対象のNginx専用のECRリポジトリは作成しない。調査エージェント用のECRリポジトリとイメージは今後整備する。
 
 ## 進め方
 
