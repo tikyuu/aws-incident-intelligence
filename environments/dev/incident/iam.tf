@@ -21,6 +21,26 @@ resource "aws_iam_role" "bedrock_agent_execution" {
   })
 }
 
+resource "aws_iam_role_policy" "bedrock_agent_inference" {
+  name = "aii-dev-bedrock-agent-inference"
+  role = aws_iam_role.bedrock_agent_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["bedrock-mantle:CreateInference"]
+      Resource = "*"
+      Condition = {
+        StringEquals = {
+          "bedrock-mantle:Model" = "openai.gpt-6.1-sol"
+          "aws:RequestedRegion"  = "us-east-1"
+        }
+      }
+    }]
+  })
+}
+
 resource "aws_iam_role" "lambda_execution" {
   name = "aii-dev-incident-lambda-execution"
 
