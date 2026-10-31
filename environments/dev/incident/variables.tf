@@ -13,11 +13,6 @@ variable "ecs_service_name" {
   type        = string
 }
 
-variable "bedrock_agent_role_arn" {
-  description = "AgentCoreが使用する、必要な権限を持つ実行用IAMロールのARN"
-  type        = string
-}
-
 variable "bedrock_agent_image_uri" {
   description = "AgentCore用の実行プログラムを含むECRコンテナイメージのURI"
   type        = string

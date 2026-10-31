@@ -1,3 +1,26 @@
+resource "aws_iam_role" "bedrock_agent_execution" {
+  name = "aii-dev-bedrock-agent-execution"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "bedrock-agentcore.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
+      Condition = {
+        StringEquals = {
+          "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+        }
+        ArnLike = {
+          "aws:SourceArn" = "arn:aws:bedrock-agentcore:ap-northeast-1:${data.aws_caller_identity.current.account_id}:runtime/*"
+        }
+      }
+    }]
+  })
+}
+
 resource "aws_iam_role" "lambda_execution" {
   name = "aii-dev-incident-lambda-execution"
 

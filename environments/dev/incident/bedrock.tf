@@ -1,6 +1,6 @@
 resource "aws_bedrockagentcore_agent_runtime" "incident" {
   agent_runtime_name = "aii_dev_bedrock_agent"
-  role_arn           = var.bedrock_agent_role_arn
+  role_arn           = aws_iam_role.bedrock_agent_execution.arn
 
   agent_runtime_artifact {
     container_configuration {
