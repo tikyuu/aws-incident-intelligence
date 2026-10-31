@@ -1,4 +1,4 @@
-"""ECS停止イベントの受信とNginxログ収集。分類と分析は今後追加する。"""
+"""CloudWatch Alarmの通知を受信する。証拠収集と分析は今後接続する。"""
 
 import json
 import os
@@ -91,24 +91,31 @@ def collect_nginx_logs(event, client=None):
 
 
 def lambda_handler(event, context):
-    detail = event.get("detail", {})
-    logs = collect_nginx_logs(event)
-    # 環境変数を含み得るイベント全体・ログ本文は出力しない。
-    record = {
-        "message": "ECS task event received",
-        "event_id": event.get("id"),
-        "event_time": event.get("time"),
-        "task_arn": detail.get("taskArn"),
-        "cluster_arn": detail.get("clusterArn"),
-        "last_status": detail.get("lastStatus"),
-        "stop_code": detail.get("stopCode"),
-        "containers": [
-            {"name": container.get("name"), "exit_code": container.get("exitCode")}
-            for container in detail.get("containers", [])
-        ],
-        "log_collection": {key: value for key, value in logs.items() if key != "events"},
-        "log_event_count": len(logs["events"]),
+    alarm = event["alarmData"]
+
+    alarm_name = alarm["alarmName"]
+    state = alarm["state"]["value"]
+
+    # 今回のアラームは、ECSのメモリメトリクス1つを監視する。
+    metric = alarm["configuration"]["metrics"][0]["metricStat"]["metric"]
+    dimensions = metric["dimensions"]
+    cluster_name = dimensions["ClusterName"]
+    service_name = dimensions["ServiceName"]
+
+    # 通知全体ではなく、受信確認に必要な項目だけを記録する。
+    print(json.dumps({
+        "message": "CloudWatch alarm received",
+        "alarm_name": alarm_name,
+        "state": state,
+        "cluster_name": cluster_name,
+        "service_name": service_name,
+    }, ensure_ascii=False))
+
+    # 受信確認まで。メトリクス・ログ取得とBedrock分析は今後追加する。
+    return {
+        "status": "received",
+        "alarm_name": alarm_name,
+        "state": state,
+        "cluster_name": cluster_name,
+        "service_name": service_name,
     }
-    print(json.dumps(record, ensure_ascii=False))
-    # 本文は将来の分析処理へ渡すために返す。機密情報の除外はBedrock連携時に実装する。
-    return {"status": "received", "event_id": event.get("id"), "logs": logs}

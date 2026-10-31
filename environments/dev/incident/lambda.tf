@@ -6,7 +6,7 @@ data "archive_file" "incident_lambda" {
 
 resource "aws_lambda_function" "incident" {
   function_name = "aii-dev-incident"
-  description   = "Collect Nginx logs for ECS task stopped events"
+  description   = "Log received CloudWatch alarm notifications"
   role          = aws_iam_role.lambda_execution.arn
   runtime       = "python3.14"
   handler       = "handler.lambda_handler"

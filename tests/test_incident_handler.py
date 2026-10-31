@@ -1,6 +1,7 @@
 """AWS APIはすべてモックし、ネットワークと認証情報を使わずに検証する。"""
 import importlib.util
 import io
+import json
 import os
 from pathlib import Path
 import unittest
@@ -112,14 +113,43 @@ class LogCollectionTests(unittest.TestCase):
                              "missing_log_group_configuration")
         self.client.get_log_events.assert_not_called()
 
-    def test_handler_does_not_print_log_body(self):
-        collected = {"status": "collected", "events": [{"timestamp": 1, "message": "SECRET_BODY"}]}
+class AlarmReceptionTests(unittest.TestCase):
+    def test_receives_alarm_without_collecting_logs_or_printing_entire_event(self):
+        event = {
+            "alarmData": {
+                "alarmName": "aii-dev-ecs-memory-high",
+                "state": {"value": "ALARM", "reason": "PRIVATE_DETAIL"},
+                "configuration": {
+                    "metrics": [{
+                        "metricStat": {
+                            "metric": {
+                                "namespace": "AWS/ECS",
+                                "name": "MemoryUtilization",
+                                "dimensions": {
+                                    "ClusterName": "aii-dev-ecs-cluster",
+                                    "ServiceName": "aii-dev-ecs-service-nginx",
+                                },
+                            },
+                            "period": 60,
+                            "stat": "Average",
+                        },
+                    }],
+                },
+            },
+        }
         output = io.StringIO()
-        with patch.object(handler, "collect_nginx_logs", return_value=collected), redirect_stdout(output):
-            result = handler.lambda_handler(self.event, None)
-        self.assertNotIn("SECRET_BODY", output.getvalue())
-        self.assertIn('"log_event_count": 1', output.getvalue())
-        self.assertEqual(result["logs"], collected)
+        with patch.object(handler, "collect_nginx_logs") as collect, redirect_stdout(output):
+            result = handler.lambda_handler(event, None)
+        collect.assert_not_called()
+        record = json.loads(output.getvalue())
+        self.assertEqual(record["alarm_name"], "aii-dev-ecs-memory-high")
+        self.assertEqual(record["state"], "ALARM")
+        self.assertEqual(record["cluster_name"], "aii-dev-ecs-cluster")
+        self.assertEqual(record["service_name"], "aii-dev-ecs-service-nginx")
+        self.assertEqual(result["cluster_name"], record["cluster_name"])
+        self.assertEqual(result["service_name"], record["service_name"])
+        self.assertNotIn("PRIVATE_DETAIL", output.getvalue())
+        self.assertEqual(result["status"], "received")
 
 
 if __name__ == "__main__":

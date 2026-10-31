@@ -23,7 +23,7 @@ resource "aws_cloudwatch_metric_alarm" "ecs_memory_high" {
   ok_actions                = []
   insufficient_data_actions = []
 
-  # ハンドラーをアラーム通知に対応させる段階でtrueにする。
+  # 受信確認の後、調査処理の接続・検証に進む段階でtrueにする。
   # 無効なのは呼び出しアクションだけで、メトリクスの評価は行われる。
   actions_enabled = false
 }
