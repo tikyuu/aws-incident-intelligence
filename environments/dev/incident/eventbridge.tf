@@ -12,6 +12,14 @@ resource "aws_cloudwatch_event_rule" "ecs_task_stopped" {
       lastStatus = ["STOPPED"]
     }
   })
+}
 
-  # Lambdaのターゲットと呼び出し許可は、Lambda実装時に追加する。
+resource "aws_cloudwatch_event_target" "incident_lambda" {
+  rule           = aws_cloudwatch_event_rule.ecs_task_stopped.name
+  event_bus_name = aws_cloudwatch_event_rule.ecs_task_stopped.event_bus_name
+  target_id      = "incident-lambda"
+  arn            = aws_lambda_function.incident.arn
+
+  # 呼び出し許可を設定してから送信先を登録する。
+  depends_on = [aws_lambda_permission.eventbridge]
 }

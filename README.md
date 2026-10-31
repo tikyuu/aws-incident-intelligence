@@ -2,7 +2,7 @@
 
 ECSタスクの異常停止を検知し、生成AIによる調査レポートを残す検証用プロジェクト。
 
-**現在はネットワーク・ECSクラスター・Nginx用ロググループ・タスク実行用IAMロール・正常系タスク定義・タスク用Security Group・停止検知用EventBridgeルール・Lambda実行用IAMロールとログ送信権限・Lambda用ロググループ・受信確認用Lambda本体のTerraform定義とPython処理まで作成済み。ECSログの読み取り権限・Bedrock連携・S3と、EventBridgeのターゲットは未実装。タスク起動手順と異常系の検証設定は未整備。AWSへの構築は未実施。** 設計と手順は、まずこのREADMEに集約する。
+**現在はネットワーク・ECSクラスター・Nginx用ロググループ・タスク実行用IAMロール・正常系タスク定義・タスク用Security Group・停止検知用EventBridgeルール・Lambda実行用IAMロールとログ送信・Nginxログ読み取り権限・Lambda用ロググループ・受信確認用Lambda本体・EventBridgeのLambdaターゲットと呼び出し許可のTerraform定義とPython処理まで作成済み。ECSログ取得のPython処理も作成済み。正常・異常の分類・Bedrock連携・S3は未実装。タスク起動手順と異常系の検証設定は未整備。AWSへの構築は未実施。** 設計と手順は、まずこのREADMEに集約する。
 
 ## 最初の完成条件
 
@@ -32,7 +32,7 @@ Nginxの設定を意図的に間違えてECSタスクを異常停止させ、停
 
 EventBridgeは停止を検知し、Lambdaが停止理由・終了コード・タスクの用途を組み合わせて分類する。
 
-EventBridgeルールはデフォルトイベントバス上で、`source = aws.ecs`・`detail-type = ECS Task State Change`・`detail.lastStatus = STOPPED`に一致し、`detail.clusterArn`が対象クラスターARNのイベントを拾う。ECS側の`cluster_arn`出力をincident側の`ecs_cluster_arn`入力変数へ渡す。現段階はルールのみで、Lambdaへの送信はターゲットと呼び出し許可を追加してから有効になる。
+EventBridgeルールはデフォルトイベントバス上で、`source = aws.ecs`・`detail-type = ECS Task State Change`・`detail.lastStatus = STOPPED`に一致し、`detail.clusterArn`が対象クラスターARNのイベントを拾う。ECS側の`cluster_arn`出力をincident側の`ecs_cluster_arn`入力変数へ渡す。ターゲットに`aii-dev-incident`のLambdaを指定済み。Lambda側の呼び出し許可（`aws_lambda_permission`）も定義し、呼び出し元を今回のルールARNに限定する。ターゲットは呼び出し許可の設定後に登録する。AWSへ構築後に、停止イベントの受信とログ出力を検証する。
 
 | ケース | 扱い |
 | --- | --- |
@@ -56,6 +56,25 @@ Lambdaは発生時刻、タスクARN、停止理由、コンテナ終了コー�
 - インシデントID、発生時刻、対象リソース、使用モデル、トークン使用量も記録する。
 - ログ取得失敗時は不足を明示する。Bedrock失敗時も、収集済み証拠と失敗理由をLambdaからS3へ残す。
 
+## Nginxログ収集（現在の実装）
+
+`incident/lambda/handler.py`はタスクARNからIDを取り出し、`ecs/nginx/<タスクID>`を読み取る。`detail.stoppedAt`（なければイベントの`time`）を基準に直前15分を検索し、停止時刻ちょうどのログも含める。
+
+- 新しいログを優先し、最大100件・本文合計20,000文字・API呼び出し3回で打ち切る。返すログは時系列順に並べる。上限到達時は`truncated`を記録するため、全件取得を保証しない。
+- 空ページでも継続トークンが変わる間は、上限内で後方ページングする。[GetLogEventsの仕様](https://docs.aws.amazon.com/boto3/latest/reference/services/logs/client/get_log_events.html)に従う。
+- ログ未到着・範囲内のログなし・ストリーム未作成・権限不足・通信エラーは理由を記録する。途中の取得失敗では、収集済みログも保持する。
+- SDKの接続・読み取りタイムアウトは各1秒、自動リトライなし。配信遅延に対する待機・再取得は未実装であり、実環境での確認と再取得設計は今後の課題。
+- ログ本文は実行ログに出さない。本文中の機密情報の除外は未実装で、Bedrock連携前に追加する。現時点では収集のみで、分類・分析・永続保存は行わない。
+
+ローカル検証（AWS接続なし）:
+
+```sh
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m unittest discover -s tests -v
+terraform fmt -check -recursive
+terraform -chdir=environments/dev/incident validate
+```
+
 ## 検証環境の方針
 
 - dev環境のみ。Terraformは`network`・`ecs`・`incident`の3つに実行ディレクトリ・Stateを分け、最初は子モジュールを作らない。
@@ -68,8 +87,8 @@ Lambdaは発生時刻、タスクARN、停止理由、コンテナ終了コー�
 - タスク実行用IAMロールは、Nginx用ロググループ内のログストリーム作成・ログ送信のみを許可する。
 - イメージ取得などに必要な通信は、Public IPとInternet Gateway経由で確保する。
 - Lambdaは初期構成ではVPCに接続しない。
-- Lambda関数名は`aii-dev-incident`。Python 3.14・arm64・メモリ128 MiB・タイムアウト10秒で定義し、実行ログ用グループ`/aws/lambda/aii-dev-incident`（保存期間3日）と実行ロールを接続する。現段階はイベントID・タスクARN・終了コードなどの受信確認のみをログに出す。環境変数などが含まれ得るイベント全体は出力せず、正常・異常の分類もまだ行わない。
-- Lambda実行ロールは`aii-dev-incident-lambda-execution`。自身のロググループ内のログストリーム作成・ログ送信のみを許可する。ロググループはTerraformで作成するため、Lambdaにロググループ作成権限は付けない。ECSログの読み取り・Bedrock呼び出し・S3保存は、対象リソースの定義に合わせて権限を追加する。
+- Lambda関数名は`aii-dev-incident`。Python 3.14・arm64・メモリ128 MiB・タイムアウト10秒で定義し、実行ログ用グループ`/aws/lambda/aii-dev-incident`（保存期間3日）と実行ロールを接続する。現段階はイベントID・タスクARN・終了コードとログ取得の概要を実行ログに出す。ログ本文は出力せず、後続の分析処理向けにハンドラーの戻り値へ含める。環境変数などが含まれ得るイベント全体は出力せず、正常・異常の分類もまだ行わない。
+- Lambda実行ロールは`aii-dev-incident-lambda-execution`。自身のロググループ内のログストリーム作成・ログ送信と、`nginx_log_group_arn`で受け取ったロググループ内のログ読み取り（`logs:GetLogEvents`）を許可する。ロググループはTerraformで作成するため、Lambdaにロググループ作成権限は付けない。Bedrock呼び出し・S3保存は、対象リソースの定義に合わせて権限を追加する。ECSのログストリーム名はタスクIDから組み立てる想定とし、一覧取得・検索の権限は付けない。ログ取得のPython処理を追加済み。環境変数`NGINX_LOG_GROUP_ARN`へ同じARNを渡し、読み取り権限の設定後にLambdaを作成する。
 - IAMは最小権限。S3はパブリックアクセスを禁止し、暗号化する。
 - 認証情報・Terraform State・機密値はGitに含めない。
 
@@ -87,7 +106,7 @@ environments/dev/
 │   ├── .terraform.lock.hcl # Providerの使用バージョン（作成済み）
 │   └── network.tf      # VPC・Subnet・Internet Gateway・ルート設定
 ├── ecs/                # ECSクラスター・ログ・実行権限・正常系タスク定義・Security Group
-└── incident/           # 停止検知ルール・Lambda実行ロールとログ送信権限・Lambda用ロググループ・受信確認用Lambdaまで作成済み。EventBridge接続・S3・分析用権限は今後追加
+└── incident/           # 停止検知ルール・Lambda実行ロールとログ送信・Nginxログ読み取り権限・Lambda用ロググループ・受信確認用Lambda・EventBridgeターゲットと呼び出し許可まで作成済み。S3・分析用権限は今後追加
 ```
 
 各ディレクトリにProvider・バージョン設定を置き、個別にinit・plan・applyする。同じディレクトリの`.tf`ファイルはまとめて読み込まれるが、隣のディレクトリは自動では読み込まれない。CloudWatch LogsとIAMは、利用するECS・Lambda側で管理する。
@@ -99,6 +118,8 @@ environments/dev/
 Stateは各ディレクトリの`terraform.tfstate`にローカル保存する（例：`environments/dev/network/terraform.tfstate`）。Gitには含めず、AWS構築後は変更・削除に備えて保管する。各ディレクトリの`.terraform.lock.hcl`はGit管理する。
 
 ディレクトリ間で必要なSubnet ID・ARNなどは、作成元のoutputから利用側の入力へ渡す。具体的な受け渡し方法は実装時に決める。作成は依存先から、削除は利用側から行う。Stateを分けるため、全体の実行順序はTerraformが自動調整しない。
+
+ECS側の`nginx_log_group_arn`出力と、incident側の同名の入力変数を定義済み。ECS側の出力値をincident側の入力へ渡す。変数を定義しただけでは自動接続されず、具体的な受け渡し手順は今後追加する。Lambda実行ロールの読み取りポリシーは、この入力変数を対象ARNとして参照する。
 
 全体の構築順は`network` → `ecs` → `incident`、削除順はその逆とする。後からモジュール化する際は、既存Stateを維持し、`moved`ブロックなどでリソースのアドレス変更に対応する。
 
