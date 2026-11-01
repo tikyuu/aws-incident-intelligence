@@ -138,7 +138,11 @@ class AlarmReceptionTests(unittest.TestCase):
             },
         }
         output = io.StringIO()
-        with patch.object(handler, "collect_nginx_logs") as collect, redirect_stdout(output):
+        with (
+            patch.dict(os.environ, {"AGENT_RUNTIME_ARN": "arn:aws:bedrock-agentcore:ap-northeast-1:123456789012:runtime/test-agent"}),
+            patch.object(handler, "collect_nginx_logs") as collect,
+            redirect_stdout(output),
+        ):
             result = handler.lambda_handler(event, None)
         collect.assert_not_called()
         record = json.loads(output.getvalue())

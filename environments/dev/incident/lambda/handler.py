@@ -91,6 +91,7 @@ def collect_nginx_logs(event, client=None):
 
 
 def lambda_handler(event, context):
+    runtime_arn = os.environ["AGENT_RUNTIME_ARN"]
     alarm = event["alarmData"]
 
     alarm_name = alarm["alarmName"]

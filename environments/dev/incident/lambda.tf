@@ -19,6 +19,7 @@ resource "aws_lambda_function" "incident" {
 
   environment {
     variables = {
+      AGENT_RUNTIME_ARN   = aws_bedrockagentcore_agent_runtime.incident.agent_runtime_arn
       NGINX_LOG_GROUP_ARN = var.nginx_log_group_arn
     }
   }
