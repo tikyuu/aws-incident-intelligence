@@ -41,6 +41,30 @@ resource "aws_iam_role_policy" "bedrock_agent_inference" {
   })
 }
 
+# Runtime実行ロール：東京のメトリクスを読む
+resource "aws_iam_role_policy" "bedrock_agent_metrics" {
+  name = "aii-dev-bedrock-agent-read-metrics"
+  role = aws_iam_role.bedrock_agent_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "cloudwatch:ListMetrics",
+        "cloudwatch:GetMetricData",
+        "cloudwatch:GetMetricStatistics",
+      ]
+      Resource = "*"
+      Condition = {
+        StringEquals = {
+          "aws:RequestedRegion" = "ap-northeast-1"
+        }
+      }
+    }]
+  })
+}
+
 resource "aws_iam_role" "lambda_execution" {
   name = "aii-dev-incident-lambda-execution"
 

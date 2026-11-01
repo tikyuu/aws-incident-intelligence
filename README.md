@@ -22,43 +22,44 @@ ECSサービスのTerraform定義は作成済み。Lambdaはアラームの受�
 
 ## 構成と役割
 
-現在は構成の比較検証を計画している段階です。まずCloudWatch investigationsによる専用AI調査とメール通知を試し、その結果を確認してからBedrock版を検証します。S3への調査結果保存は今回の比較案から外します。以下の旧案は比較用に残しており、採用決定を意味しません。Terraform・Pythonには、まだ比較案の変更を反映していません。
+CloudWatch investigations案とBedrock案を用意し、動作確認は両案の準備後にまとめて行います。CloudWatch案はTerraformの定義を追加済みです。Bedrock案はAgentCore Runtime側で調査を進める構成とし、既存コードの修正・接続はこれからです。両案ともS3への調査結果保存は含めません。AWS上での構築・動作確認は未実施です。
 
 ![比較案A：CloudWatchの専用AI調査とメール通知](docs/architecture-investigations.png)
 
-[比較案AのSVG](docs/architecture-investigations.svg)もあります。[draw.ioファイル](docs/architecture.drawio)には、先頭に「① CloudWatch案」、2枚目に既存の「② Bedrock旧案」を配置しています。シートはdraw.io画面下部のタブで切り替えます。図にはサービスと処理の流れを中心に表示し、詳細な検証項目はこのREADMEに記載しています。
+[比較案AのSVG](docs/architecture-investigations.svg)もあります。[draw.ioファイル](docs/architecture.drawio)には、先頭に「① CloudWatch案」、2枚目に「② Bedrock案」を配置しています。シートはdraw.io画面下部のタブで切り替えます。図にはサービスと処理の流れを中心に表示し、詳細な検証項目はこのREADMEに記載しています。
 
 比較案Aは「メモリアラーム → CloudWatch investigations → SNS → メール」です。SNSは通知を届けるサービスです。まず調査更新をSNSからそのままメールへ配信し、Lambdaによる整形は追加しません。専用調査機能のSNS連携は[公式仕様](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Investigations-Integrations.html)、メール配信は[SNSの公式手順](https://docs.aws.amazon.com/sns/latest/dg/sns-email-notifications.html)を参考にします。メールが希望する項目や読みやすさを満たすか確認し、不足がある場合に整形処理を検討します。
 
-案①の設定先は`environments/dev/investigations/`、案②は既存の`environments/dev/incident/`とし、ネットワークとECSは共通で利用する予定です。案①の通知先はローカルの`terraform.tfvars`に保存し、Gitには含めません。現在は通知先の保存のみで、案①のTerraformリソースは未定義・未構築です。メール通知を構築した際には、SNSから届く購読確認メールの承認が必要です。
+案①の設定先は`environments/dev/investigations/`、案②は既存の`environments/dev/incident/`とし、ネットワークとECSは共通で利用する予定です。案①の通知先はローカルの`terraform.tfvars`に保存し、Gitには含めません。案①の調査グループ・IAM権限・SNS・メモリアラームは定義済み、AWSには未構築です。メール通知を構築した際には、SNSから届く購読確認メールの承認が必要です。
 
 AWS上のテストは未実施です。AWS構築前に利用料金と停止・削除手順を確認し、検証は次の順に進めます。
 
 1. 調査対象への権限を読み取りに限定し、検証用ECSサービスで既知のメモリ負荷を発生させ、80%超過によるアラームから調査が自動開始されることを確認する。
 2. 専用調査機能の通知データを確認し、検知内容・根拠となるログやメトリクス・原因候補・対策案の有無を記録する。原因が未特定の場合は、通知上どのように示されるか確認する。通知データだけでは項目を満たせない場合は、不足を記録し、推測で補完して実装完了としない。
 3. ローカル設定の宛先へメールを送信できることを確認し、調査更新と、原因候補の承認を伴う正式な事後レポートを区別する。通知本文はまず加工せず、読みやすさ、重複通知、調査や配信の失敗時の動作も確認する。
-4. 検知から通知までの時間・通知件数・データ取得量・利用料金を記録する。その後、負荷条件・対象サービス・調査対象時間帯を揃えてBedrock版と比較する。Bedrock版のモデルや実行方式は、比較案Aの結果を確認してから決める。
+4. 両案の準備後、負荷条件・対象サービス・調査対象時間帯を揃えて比較する。検知から通知までの時間・通知件数・データ取得量・利用料金を記録する。Bedrock版はAgentCore RuntimeとGPT-6.1 Solを使う構成案とし、利用アカウントでのモデル呼び出しと調査処理は検証時に確認する。
 
 専用調査機能には[関連API等の利用料金](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/investigations-costs.html)が発生する場合があります。ECSの調査品質を高めるために[Container Insightsの有効化が推奨](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Investigations-Services.html)されていますが、現在は無効です。有効化の要否と追加費用は構築前に確認します。
 
-以下は保存している旧案です。
+以下はBedrock案の更新後の構成です。
 
-![メモリアラームからAI調査とレポート保存までの完成予定構成](docs/architecture.png)
+![Bedrock案：AgentCoreで調査を進め、SNSからメールで通知](docs/architecture.png)
 
-[draw.ioで編集するファイル](docs/architecture.drawio)・[拡大表示用SVG](docs/architecture.svg)もあります。「② Bedrock旧案」は、既存設計のサービスと役割を簡略化して表示しています。東京の調査処理と米国東部のモデル呼び出し先を分け、観測経路を実線、計画中の調査・保存経路を点線で示しています。詳細な設定値や実装状況の表示は省略しており、AWS上での動作は未検証です。旧案のS3は比較用に残していますが、今回先に試す「① CloudWatch案」にはS3保存を含めません。
+[draw.ioで編集するファイル](docs/architecture.drawio)・[拡大表示用SVG](docs/architecture.svg)もあります。「② Bedrock案」は、Lambdaが調査を依頼し、AgentCore Runtime側の調査プログラムがBedrockに判断を求めながらCloudWatchとECSの情報を読み取る構成です。結果はRuntime側からSNSへ送り、メールで通知します。東京の調査処理と米国東部のモデル呼び出し先を分け、情報取得を実線、計画中の調査依頼・モデル呼び出し・通知を点線で示しています。コードの接続とAWS上の動作は未検証です。
 
-CloudWatchは1つの枠にまとめ、その中にAlarmとLogs / Metricsを表示しています。AgentCore Runtimeはエージェントを動かす場所、AgentCore Gatewayは調査APIへの窓口として、箱の見出しで区別しています。
+CloudWatchはアラーム・ログ・メトリクスを1つの箱にまとめています。AgentCore Runtimeは調査プログラムを動かす場所、BedrockはAIの判断・分析を担当します。Gatewayは採用未定のため図から省略しています。読み取り用の道具の接続方法は今後確認します。
 
-アイコンは[AWS公式配布ページ](https://aws.amazon.com/architecture/icons/)で2026年10月31日に確認した現行版（2026年7月31日版）を使用しています。RuntimeとGatewayには、共通のAgentCoreサービスアイコンを使用しています。
+アイコンは[AWS公式配布ページ](https://aws.amazon.com/architecture/icons/)で2026年10月31日に確認した版（2026年7月31日版）を使用しています。RuntimeにはAgentCoreサービスアイコンを使用しています。
 
 | サービス・道具 | 担当 |
 | --- | --- |
 | ECS Fargate | ECSサービスで監視対象のコンテナを実行する |
 | EventBridge | 今回は使用しない。旧構成の停止検知用定義は削除済み |
 | CloudWatch | メモリメトリクスを監視し、アラームからLambdaを直接呼び出す。CloudWatch Logsで関連ログを保管する |
-| Lambda | アラーム対象の特定、証拠収集、Bedrockへの依頼、結果の保存を行う |
-| Bedrock | 渡された証拠から原因候補と対応方法を生成する |
-| S3 | 障害ごとのレポートをファイルとして残す |
+| Lambda | アラームを受け取り、AgentCore側へ調査を依頼する |
+| AgentCore Runtime | 調査プログラムを動かし、情報取得・Bedrockとのやり取り・結果の通知を進める |
+| Bedrock | 次に調べる内容を判断し、原因候補と対応方法をまとめる |
+| SNS | 調査結果をメールで配信する |
 | Terraform | 上記のAWSリソースをコードで作成・削除する |
 
 監視対象のECSタスクとは別に調査エージェントを動かす。Lambdaをアラーム通知の入口とし、エージェントに調査を依頼する。エージェントのAgentCore Runtimeと実行用ロールのTerraform定義は作成済みだが、実行権限とプログラムは未実装。DynamoDBは初期構成に追加しない。
