@@ -1,204 +1,210 @@
 # AWS Incident Intelligence
 
-ECSのメモリ使用率が高い状態をCloudWatch Alarmで検知し、生成AIによる調査レポートを残す検証用プロジェクト。
+ECSのメモリ使用率の上昇をきっかけにAIが調査し、原因候補・根拠・優先順位付きの対策案をメールで知らせる検証用プロジェクトです。
 
-**現在はネットワーク・ECSクラスター・Nginxタスク定義・ECSサービス・Security Group・ECSとLambdaのログ・IAM権限・アラーム受信確認用Lambda・停止イベント向けのNginxログ取得関数を作成済み。旧構成のEventBridge停止検知ルール・ターゲット・Lambda呼び出し許可は削除済み。メモリアラームとCloudWatchからのLambda呼び出し許可も定義済み。Lambdaはアラーム名・状態・クラスター名・サービス名を記録する受信確認まで実装済み。アラームの呼び出しアクションは無効のまま。メトリクス収集・アラームからのログ取得・Bedrock連携・S3は未実装。AWSへの構築は未実施。** 設計と手順は、まずこのREADMEに集約する。
+**現在はTerraformのリソース定義、Lambdaからハーネスへの呼び出し処理、日本語の調査指示、AWS CLI用Dockerfileを用意した段階です。イメージのビルド・ECRへのアップロード・AWSへの構築・実環境での動作確認は未実施です。** 定義済みのコードが、そのまま正常動作することを保証する段階ではありません。
 
-## 最初の完成条件
+## 完成条件と比較する構成
 
-ECSサービスのメモリ使用率が高い状態が続いたらCloudWatch Alarmで検知し、Lambdaがメモリの推移と関連ログを収集してBedrockへ渡し、原因候補・根拠・追加の確認事項を含むJSON・MarkdownのレポートをS3に保存できること。タスクが停止する前でも調査を開始する。
+同じ検証用ECSサービスで、次の2案を比較します。両案の準備後、デプロイと動作確認をまとめて行います。調査結果のS3保存は行いません。
 
-基本の流れは「ECSサービス → CloudWatchのメモリメトリクス → CloudWatch Alarm → Lambda → Bedrock → S3」。関連ログはCloudWatch LogsからLambdaが取得する。
+| 案 | 流れ | Terraformの実行先 |
+| --- | --- | --- |
+| ① CloudWatch案 | メモリアラーム → CloudWatch investigations → SNS → メール | `environments/dev/investigations/` |
+| ② Bedrock案 | メモリアラーム → Lambda → AgentCore harness ↔ BedrockのAIモデル。ハーネスからSNS → メール | `environments/dev/incident/` |
 
-ECSサービスで検証用タスクを1個動かす方針。クラスター名は`aii-dev-ecs-cluster`、サービス名は`aii-dev-ecs-service-nginx`とする。メモリはまずサービス単位の`AWS/ECS`の`MemoryUtilization`を監視する。条件は1分間の平均が80%を超えた場合に1回で発報、欠損データはデータ不足とする。メモリ使用量を意図的に増やす検証方法は別途整備する。Nginx単体への通信で十分なメモリ増加が起きるとは限らないため、検証用アプリや負荷生成方法も検討する。
+原因が特定できない場合は、断定せず、不明点と追加で確認する対象を示すことを目指します。設定変更・再起動・停止などの自動復旧は行いません。
 
-CloudWatch Alarmの`ALARM`状態への遷移時のアクションにLambdaを設定する。Lambda側には対象アラームARNとアカウントに限定した呼び出し許可を定義する。ハンドラーは直接呼び出しの`alarmData`からアラーム名・状態・対象クラスター名・サービス名を読み取る。ALARMが継続している間に定期実行する設計ではない。[AWS公式の直接呼び出し仕様](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/alarms-and-actions-Lambda.html)に従う。
+### ① CloudWatch案
 
-高いメモリ使用率だけで、停止の予兆やメモリリークと断定しない。レポートでは観測した事実と原因候補を分け、ログやメトリクスで確認できないことは不足として記録する。
+![CloudWatchの専用AI調査とメール通知](docs/architecture-investigations.png)
 
-ECSサービスのTerraform定義は作成済み。Lambdaはアラームの受信確認に対応済み。メモリアラームと直接呼び出し設定・許可は定義済みだが、呼び出しアクションは無効。メトリクス収集・アラーム対象からタスクとログを特定する処理は未実装。旧構成の停止検知ルール・ターゲット・Lambda呼び出し許可と、不要になったincident側の`ecs_cluster_arn`入力変数は削除済み。ログ収集は流用できる部分を活用する。起動失敗の分析は最初の完成条件から外す。
+CloudWatch investigationsの調査グループ・読み取り権限・SNS連携・メモリアラームを定義済みです。調査更新をSNSからそのままメールへ配信し、Lambdaによる整形は追加しません。
 
-ユーザーはメモリ監視を優先し、必要なコストを許容する方針。AWS構築前には、具体的な構成の概算費用と停止・削除手順を確認する。コスト許容の表明をAWSへの構築実行の承認とは扱わない。
+通知に原因候補・根拠・対策案がどこまで含まれるかは、実際の通知で確認します。調査更新の通知と、原因候補の承認を伴う正式な事後レポートは区別します。不足があっても、推測で補完して検証完了とはしません。
 
-## 構成と役割
+Container Insightsは現在無効です。調査品質のために有効化するか、追加費用と併せてデプロイ前に確認します。
 
-CloudWatch investigations案とBedrock案を用意し、動作確認は両案の準備後にまとめて行います。CloudWatch案はTerraformの定義を追加済みです。Bedrock案はAgentCore Runtime側で調査を進める構成とし、既存コードの修正・接続はこれからです。両案ともS3への調査結果保存は含めません。AWS上での構築・動作確認は未実施です。
+### ② Bedrock案
 
-![比較案A：CloudWatchの専用AI調査とメール通知](docs/architecture-investigations.png)
-
-[比較案AのSVG](docs/architecture-investigations.svg)もあります。[draw.ioファイル](docs/architecture.drawio)には、先頭に「① CloudWatch案」、2枚目に「② Bedrock案」を配置しています。シートはdraw.io画面下部のタブで切り替えます。図にはサービスと処理の流れを中心に表示し、詳細な検証項目はこのREADMEに記載しています。
-
-比較案Aは「メモリアラーム → CloudWatch investigations → SNS → メール」です。SNSは通知を届けるサービスです。まず調査更新をSNSからそのままメールへ配信し、Lambdaによる整形は追加しません。専用調査機能のSNS連携は[公式仕様](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Investigations-Integrations.html)、メール配信は[SNSの公式手順](https://docs.aws.amazon.com/sns/latest/dg/sns-email-notifications.html)を参考にします。メールが希望する項目や読みやすさを満たすか確認し、不足がある場合に整形処理を検討します。
-
-案①の設定先は`environments/dev/investigations/`、案②は既存の`environments/dev/incident/`とし、ネットワークとECSは共通で利用する予定です。案①の通知先はローカルの`terraform.tfvars`に保存し、Gitには含めません。案①の調査グループ・IAM権限・SNS・メモリアラームは定義済み、AWSには未構築です。メール通知を構築した際には、SNSから届く購読確認メールの承認が必要です。
-
-AWS上のテストは未実施です。AWS構築前に利用料金と停止・削除手順を確認し、検証は次の順に進めます。
-
-1. 調査対象への権限を読み取りに限定し、検証用ECSサービスで既知のメモリ負荷を発生させ、80%超過によるアラームから調査が自動開始されることを確認する。
-2. 専用調査機能の通知データを確認し、検知内容・根拠となるログやメトリクス・原因候補・対策案の有無を記録する。原因が未特定の場合は、通知上どのように示されるか確認する。通知データだけでは項目を満たせない場合は、不足を記録し、推測で補完して実装完了としない。
-3. ローカル設定の宛先へメールを送信できることを確認し、調査更新と、原因候補の承認を伴う正式な事後レポートを区別する。通知本文はまず加工せず、読みやすさ、重複通知、調査や配信の失敗時の動作も確認する。
-4. 両案の準備後、負荷条件・対象サービス・調査対象時間帯を揃えて比較する。検知から通知までの時間・通知件数・データ取得量・利用料金を記録する。Bedrock版はAgentCore RuntimeとGPT-6.1 Solを使う構成案とし、利用アカウントでのモデル呼び出しと調査処理は検証時に確認する。
-
-専用調査機能には[関連API等の利用料金](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/investigations-costs.html)が発生する場合があります。ECSの調査品質を高めるために[Container Insightsの有効化が推奨](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Investigations-Services.html)されていますが、現在は無効です。有効化の要否と追加費用は構築前に確認します。
-
-以下はBedrock案の更新後の構成です。
-
-![Bedrock案：AgentCoreで調査を進め、SNSからメールで通知](docs/architecture.png)
-
-[draw.ioで編集するファイル](docs/architecture.drawio)・[拡大表示用SVG](docs/architecture.svg)もあります。「② Bedrock案」は、Lambdaが調査を依頼し、AgentCore Runtime側の調査プログラムがBedrockに判断を求めながらCloudWatchとECSの情報を読み取る構成です。結果はRuntime側からSNSへ送り、メールで通知します。東京の調査処理と米国東部のモデル呼び出し先を分け、情報取得を実線、計画中の調査依頼・モデル呼び出し・通知を点線で示しています。コードの接続とAWS上の動作は未検証です。
-
-CloudWatchはアラーム・ログ・メトリクスを1つの箱にまとめています。AgentCore Runtimeは調査プログラムを動かす場所、BedrockはAIの判断・分析を担当します。Gatewayは採用未定のため図から省略しています。読み取り用の道具の接続方法は今後確認します。
-
-アイコンは[AWS公式配布ページ](https://aws.amazon.com/architecture/icons/)で2026年10月31日に確認した版（2026年7月31日版）を使用しています。RuntimeにはAgentCoreサービスアイコンを使用しています。
+![ハーネスが調査を進め、SNSからメールで通知](docs/architecture.png)
 
 | サービス・道具 | 担当 |
 | --- | --- |
-| ECS Fargate | ECSサービスで監視対象のコンテナを実行する |
-| EventBridge | 今回は使用しない。旧構成の停止検知用定義は削除済み |
-| CloudWatch | メモリメトリクスを監視し、アラームからLambdaを直接呼び出す。CloudWatch Logsで関連ログを保管する |
-| Lambda | アラームを受け取り、AgentCore側へ調査を依頼する |
-| AgentCore Runtime | 調査プログラムを動かし、情報取得・Bedrockとのやり取り・結果の通知を進める |
-| Bedrock | 次に調べる内容を判断し、原因候補と対応方法をまとめる |
-| SNS | 調査結果をメールで配信する |
-| Terraform | 上記のAWSリソースをコードで作成・削除する |
+| ECS Fargate | 監視対象のNginxコンテナを実行する |
+| CloudWatch | メモリ使用率を監視し、アラームを通知する。ログ・メトリクスを保管する |
+| Lambda | アラーム情報をハーネスに渡し、応答を最後まで受け取る |
+| AgentCore harness | AIへの相談、道具の実行、結果の受け渡しを繰り返して調査を進める。実行基盤はAWSが管理するRuntime |
+| BedrockのAIモデル | 次に調べる内容を判断し、原因候補と対策をまとめる |
+| AWS CLI | ハーネスの環境内で、権限に従ってAWSへ問い合わせる。結果をSNSへ送る |
+| ECR | AWS CLI入りの実行環境イメージを保管する |
+| SNS | 調査結果を登録先のメールへ配信する |
+| Terraform | リソース・設定・IAM権限をコードで管理する |
 
-監視対象のECSタスクとは別に調査エージェントを動かす。Lambdaをアラーム通知の入口とし、エージェントに調査を依頼する。エージェントのAgentCore Runtimeと実行用ロールのTerraform定義は作成済みだが、実行権限とプログラムは未実装。DynamoDBは初期構成に追加しない。
+調査先はAIが必要に応じて判断します。現在の読み取り権限は主に東京のCloudWatchと対象ECSに限定しています。指示文を広く書いても、IAMで許可していない情報は取得できません。足りない情報は、追加で確認すべき対象と理由として報告する方針です。
 
-## アラームを起点とする呼び出し
+以前の独立した`aws_bedrockagentcore_agent_runtime`定義と、そのイメージURI用変数は削除済みです。調査を進めるループを自作する方式から、設定で管理するハーネスへ切り替えています。EventBridge、Gateway、Knowledge Bases、DynamoDBは今回の構成には追加していません。
 
-指定したメモリアラームが`ALARM`状態へ変わったときにLambdaを直接呼び出す設計。重複配信・再発・回復時の扱いは、アラームと受信処理の実装時に決める。
+[draw.ioファイル](docs/architecture.drawio)には「① CloudWatch案」「② Bedrock案」の2シートがあります。画面下部のタブで切り替えます。[CloudWatch案のSVG](docs/architecture-investigations.svg)・[Bedrock案のSVG](docs/architecture.svg)もあります。図は構成案であり、接続の動作確認済みを示すものではありません。
 
-従来のEventBridgeによるタスク停止検知ルール、Lambdaターゲット、EventBridgeからの呼び出し許可は削除済み。CloudWatch Alarm本体を`incident/alarms.tf`、CloudWatchからの呼び出し許可を`incident/lambda.tf`に定義済み。対象のアラームARNとアカウントで許可範囲を限定する。
+アイコンは[AWS公式配布ページ](https://aws.amazon.com/architecture/icons/)の2026年7月31日版を使用しています。ハーネスにはAgentCoreサービスアイコンを使用しています。
 
-メモリアラーム`aii-dev-ecs-memory-high`は次の条件で定義済み。
+## メモリアラーム
 
-| 項目 | 設定 |
+共通の監視対象は、クラスター`aii-dev-ecs-cluster`、サービス`aii-dev-ecs-service-nginx`です。
+
+| 項目 | 両案共通の設定 |
 | --- | --- |
 | メトリクス | `AWS/ECS`の`MemoryUtilization` |
-| 監視対象 | 入力変数`ecs_cluster_name`・`ecs_service_name`で指定 |
 | 集計 | `Average`、60秒 |
-| しきい値 | `GreaterThanThreshold`、80（80%ちょうどは超過に含めない） |
+| しきい値 | 80%を超える。80%ちょうどは含めない |
 | 発報 | 評価期間1、超過データポイント1 |
-| 欠損 | `missing`。評価対象がすべて欠損したら`INSUFFICIENT_DATA` |
-| 呼び出し | `ALARM`への遷移時にLambda。回復・データ不足時のアクションはなし |
+| 欠損データ | `missing`。評価対象がすべて欠損したら`INSUFFICIENT_DATA` |
+| 通知契機 | `ALARM`への遷移。回復・データ不足時のアクションはなし |
 
-メトリクスの到着・評価タイミングにより、負荷を与えてから正確に60秒後に検知するとは限らない。アラームがALARMのままでも繰り返し呼び出す設計ではない。
+2案は独立したアラームを定義しています。①は`aii-dev-investigations-ecs-memory-high`で`actions_enabled = true`、②は`aii-dev-ecs-memory-high`で**`actions_enabled = false`**です。②はデプロイ・検証の準備が整ってから有効化します。無効なのはアクションであり、メトリクスの評価ではありません。
 
-**現在は`actions_enabled = false`**。AWSへ構築した場合、アラームの評価は行われるがLambdaは呼び出されない。受信確認後、調査処理の接続・検証に進む段階で有効化する。
+ALARMが継続している間に定期実行する設計ではありません。メトリクスの到着・評価時刻により、負荷を与えた正確に60秒後に発報するとは限りません。高い使用率だけで、メモリリークや停止の予兆とは断定しません。
 
-`lambda_handler`は`event["alarmData"]`から`alarmName`と`state.value`を取り出す。さらに`configuration.metrics[0].metricStat.metric.dimensions`から`ClusterName`と`ServiceName`を読み、必要な項目だけをJSONで実行ログに記録する。今回定義した単一メトリクスのアラームを対象とし、複合アラームやメトリクス数式は扱わない。通知全体は出力しない。現在は受信確認のみで、状態による分岐・AWS APIの呼び出し・証拠収集・分析は行わない。必須キーが欠けた通知は例外となり、受信成功とは扱わない。
+メモリ負荷の発生方法は未整備です。Nginxへの通信だけで十分なメモリ増加が起きるとは限らないため、検証方法を別途決めます。
 
-以前の`collect_nginx_logs`関数は停止イベント向けのまま残しているが、現在のハンドラーからは呼び出さない。今後、アラーム対象サービスのタスクを特定し、稼働中のタスクのログ取得に対応させる。
+## Lambdaの実装状況
 
-## 分析に渡す情報とレポート
+`incident/lambda/handler.py`は、CloudWatchからの直接呼び出しで届く`alarmData`を読み取ります。今回の単一メトリクスのアラームを対象とし、複合アラームやメトリクス数式には対応していません。
 
-Lambdaはアラーム名・状態変化の時刻・判定条件・対象クラスターとサービス、メモリ使用率の時系列、関連するタスクとログを収集する設計とする。現在のハンドラーはアラーム名・状態・対象クラスター名・サービス名の受信確認のみ。発生時刻・対象タスクの特定・メトリクス取得・必要なIAM権限を今後追加する。
+1. アラーム名・状態・発生時刻・クラスター名・サービス名を取り出す。
+2. アラーム名・発生時刻・クラスター名・サービス名と調査依頼を、`InvokeHarness`のユーザーメッセージとして渡す。
+3. 応答ストリームを最後まで読み、最後の停止理由が`end_turn`の場合に`completed`を返す。実行エラーや上限到達、応答の不完全な終了は例外とする。
 
-メモリ使用率の推移を最初の完成条件に含める。CPUなど追加の情報をどこまで収集するかは別途決める。取得失敗時には不足と理由を明示し、メモリの値だけで原因を断定しない。
+呼び出し先は環境変数`HARNESS_ARN`から取得します。セッションIDは呼び出しごとにUUIDを生成します。バックグラウンド調査の受付だけを確認して終了する実装ではなく、Lambdaが応答を待つ実装です。接続タイムアウト3秒・読み取りタイムアウト330秒・SDKの自動リトライなしです。
 
-- ログの時間範囲・件数・文字数を制限し、認証情報などを除外してからBedrockへ送る。
-- ログやイベントは信頼できない入力として扱い、内部の指示文に従わせない。
-- BedrockのモデルIDと呼び出し先リージョンは、1環境用の固定値としてTerraformに直接記述し、実行プログラムへ環境変数で渡す。
-- レポートは「概要・確認できた事実・原因候補と根拠・追加調査項目・推奨対応」を分ける。
-- インシデントID、発生時刻、対象リソース、使用モデル、トークン使用量も記録する。
-- ログ取得失敗時は不足を明示する。Bedrock失敗時も、収集済み証拠と失敗理由をLambdaからS3へ残す。
+Lambdaの実行ログには受信確認に必要な項目と失敗時のエラー種別を残します。通知全体や調査結果の本文は出力しません。`completed`はハーネスの正常終了を示し、SNS配信やメール到着をLambdaが独立に検証した結果ではありません。
 
-## Nginxログ収集（既存関数。現在のハンドラーからは未接続）
+旧方式の`collect_nginx_logs`関数は残っていますが、現在のハンドラーからは呼び出しません。停止イベントの直前15分を対象に、最大100件・20,000文字・3回のAPI呼び出しでログを取得する関数です。対応するLambdaのログ読み取り権限と`NGINX_LOG_GROUP_ARN`も残っており、整理対象です。
 
-`incident/lambda/handler.py`はタスクARNからIDを取り出し、`ecs/nginx/<タスクID>`を読み取る。`detail.stoppedAt`（なければイベントの`time`）を基準に直前15分を検索し、停止時刻ちょうどのログも含める。
+## ハーネスの設定と調査結果
 
-- 新しいログを優先し、最大100件・本文合計20,000文字・API呼び出し3回で打ち切る。返すログは時系列順に並べる。上限到達時は`truncated`を記録するため、全件取得を保証しない。
-- 空ページでも継続トークンが変わる間は、上限内で後方ページングする。[GetLogEventsの仕様](https://docs.aws.amazon.com/boto3/latest/reference/services/logs/client/get_log_events.html)に従う。
-- ログ未到着・範囲内のログなし・ストリーム未作成・権限不足・通信エラーは理由を記録する。途中の取得失敗では、収集済みログも保持する。
-- SDKの接続・読み取りタイムアウトは各1秒、自動リトライなし。配信遅延に対する待機・再取得は未実装であり、実環境での確認と再取得設計は今後の課題。
-- ログ本文は実行ログに出さない。本文中の機密情報の除外は未実装で、Bedrock連携前に追加する。この関数を単独で呼んだ場合の収集処理であり、アラーム受信からは未接続。分類・分析・永続保存は行わない。
+`incident/bedrock.tf`に`aws_bedrockagentcore_harness.incident`を定義しています。
 
-ローカル検証（AWS接続なし）:
+| 項目 | 現在の設定 |
+| --- | --- |
+| 名前 | `aii_dev_bedrock_agent` |
+| ハーネスのリージョン | 東京（`ap-northeast-1`） |
+| モデルID | `global.openai.gpt-6.1-sol` |
+| モデルの呼び出し方式 | `converse_stream` |
+| 実行環境イメージ | 今回のECRの`:v1` |
+| 指示文 | `agent/instructions.txt` |
+| 通知先 | 環境変数`SNS_TOPIC_ARN`で渡す |
+| 調査の繰り返し上限 | `max_iterations = 10` |
+| 生成トークンの合計上限 | `max_tokens = 8192`。入力トークンや金額の上限ではない |
+| 調査の時間上限 | `timeout_seconds = 300` |
+| 管理されたメモリ機能 | 無効 |
+
+グローバル推論ではモデルの実行先をAWSが選ぶため、東京固定・米国東部固定ではありません。東京からこのモデルを呼び出せるか、利用アカウントでアクセスできるかは未確認です。デプロイ時の確認事項として残します。
+
+追加のVPC接続やJWT認証は設定していません。公開ネットワークとIAM認証を利用する方針で、誰でも匿名で呼び出せる設定を意図するものではありません。
+
+日本語の指示では、権限内での読み取り調査、設定変更・再起動・停止の禁止、事実と推測の区別を指定しています。報告は「概要・原因候補と根拠・不明点・優先順位付きの対策案」の順に、簡潔で分かりやすくまとめます。専門用語には短い説明を添え、対策案には期待する効果・影響・確認方法を含めます。
+
+結果のSNS送信もAWS CLIで行うよう指示しています。送信失敗時はその旨を報告する指示ですが、実際の通知・失敗時の動作は未検証です。両案のメール通知にはSNSの購読確認が必要です。宛先はローカルの`terraform.tfvars`で管理し、Gitに含めません。
+
+指示文だけで安全性や通知を保証しません。調査対象への変更権限は与えず、ログ記録・指定SNSへの送信など必要な操作を別途許可しています。ログやイベント本文中の指示を信頼しないこと、機密情報の扱い、取得量・調査時間帯の制限、権限不足時の動作は検証・確認事項です。
+
+## AWS CLI入りイメージ
+
+`incident/agent/Dockerfile`はAmazon Linux 2023を土台に、ハーネス用の基本コマンドとAWS CLI `2.39.3`をインストールします。ハーネス用に`linux/arm64`でビルドする必要があります。CLIの標準リージョンは東京、ページャーと対話プロンプトは無効です。認証情報はイメージに埋め込みません。
+
+ECRリポジトリ`aii-dev-ecr-bedrock-agent`は、タグの上書きを禁止する`IMMUTABLE`、アップロード時のスキャンを有効にする`scan_on_push = true`で定義しています。更新時は新しいタグを用意し、ハーネスの指定も更新します。監視対象のNginxには公式イメージを使い、専用のECRを作りません。
+
+イメージのビルド確認もデプロイ時にまとめます。ECRの作成・イメージのアップロードをハーネス作成より先に行う必要があり、具体的な初回構築手順は未整備です。最初は手動で確認し、CI/CDはその後に検討します。
+
+## 検証環境とログ
+
+- devの1環境のみ。1 AZ・Public Subnet 1つで、ALB・NAT Gatewayは作成しません。
+- ECSはFargate、Linux / X86_64、CPU 0.25 vCPU・メモリ512 MiB、`nginx:1.30.6`、`desired_count = 1`です。ローリング更新は最小稼働率100%・最大200%で、更新中は最大2タスクになります。
+- タスクにはPublic IPを付与します。Security Groupは受信ルールなし、送信はTCP 443（HTTPS）のみです。オートスケーリングは設定しません。
+- Nginxのログストリームは`ecs/nginx/<タスクID>`です。ログ送信は`non-blocking`・バッファ10 MiBで、超過時には欠落し得ます。
+- LambdaはVPC接続なし、関数名`aii-dev-incident`、Python 3.14・arm64・メモリ128 MiB・制限時間360秒です。
+
+| ログ | ロググループ | 保存期間 |
+| --- | --- | --- |
+| ECS（Nginx） | `/aii/dev/ecs/nginx` | 7日 |
+| Lambda | `/aws/lambda/aii-dev-incident` | 7日 |
+| ハーネスの実行基盤 | `/aws/bedrock-agentcore/runtimes/<Runtime ID>-DEFAULT` | 7日 |
+
+3つのロググループはTerraformで定義しています。ハーネス側の名前は、AWSがハーネス用に用意するRuntime IDを参照します。ハーネス実行ロールには、対象グループのストリーム確認・作成・書き込みを許可し、ロググループ作成権限は付けません。Lambdaの作成順序には、このログ記録設定への依存を追加しています。実際のログ生成はAWS上で確認します。
+
+この3つですべての操作履歴やAIへの入力・出力を網羅するわけではありません。モデル呼び出しログなど、追加の記録は未設定です。
+
+アカウント全体を対象に月3 USDの予算通知を定義しています。実績が予算の50%・80%・100%を超えた場合にメール通知します。これは課金を止める上限ではありません。構築前に概算費用と停止・削除手順を確認します。
+
+## Terraformのファイル構成とState
+
+```text
+environments/dev/
+├── network/          # VPC・Subnet・通信経路
+├── ecs/              # クラスター・タスク定義・サービス・ログ・IAM
+├── investigations/   # ① CloudWatchの専用AI調査・SNS・アラーム
+└── incident/         # ② Lambda・ハーネス・ECR・SNS・ログ・IAM・予算
+    ├── bedrock.tf
+    ├── ecr.tf
+    ├── iam.tf
+    ├── cloudwatch.tf
+    ├── lambda.tf
+    ├── sns.tf
+    └── agent/
+        ├── Dockerfile
+        └── instructions.txt
+```
+
+各ディレクトリは独立したTerraformの実行先です。同じディレクトリ内の`.tf`はまとめて読み込まれますが、親ディレクトリから子の定義が自動でまとめて実行される構成ではありません。モジュール化は構成が固まってから検討します。
+
+Providerは東京を指定しています。案①はAWS Providerに加えてAWSCC Providerを使用します。Stateは各ディレクトリの`terraform.tfstate`にローカル保存し、Gitには含めません。認証情報・個人の通知先もGit管理対象外です。各実行先の`.terraform.lock.hcl`はGit管理する方針です。
+
+ネットワークの`vpc_id`・`public_subnet_id`出力をECSへ、ECSの`cluster_name`・`service_name`・`nginx_log_group_arn`出力を`incident`の入力へ渡します。`investigations`は対象クラスター・サービス名を固定値で記述し、ログ権限では自分のアカウントの固定ロググループを参照しています。ディレクトリ間の値は自動接続されないため、具体的な受け渡し手順をデプロイ前に整備します。
+
+構築は`network` → `ecs` → 比較する調査側の順、削除は調査側 → `ecs` → `network`です。調査側のうち`incident`には、ECRの先行作成とイメージのアップロードが必要です。Stateが分かれているため、実行順は自動調整されません。ECR内のイメージを含め、具体的な削除手順は構築前に確認します。
+
+LambdaはArchive Providerで`incident/build/incident-lambda.zip`にまとめます。`build/`はGit管理対象外です。保存したplanをapplyする場合は、対応するZIPも保持する必要があります。
+
+命名は`aii-環境-用途`を基本とします。`aii`はAWS Incident Intelligenceの略称です。共通タグは`Project = aii`、`Environment = dev`、`ManagedBy = Terraform`です。ハーネス名はサービスの命名制約に合わせてアンダースコアを使用します。
+
+## 検証と残作業
+
+AWS APIをモックしたPythonテストは9件あります。ログ収集の既存関数と、アラーム受信・ハーネス呼び出し・応答の正常終了／失敗を確認します。Terraformのfmt・validateとSDKのリクエスト形式もローカルで確認していますが、AWS上の権限・リージョン対応・メール到着を検証したものではありません。
+
+Pythonのローカル確認:
 
 ```sh
 .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python -m unittest discover -s tests -v
 terraform fmt -check -recursive
-terraform -chdir=environments/dev/ecs validate
-terraform -chdir=environments/dev/incident validate
 ```
 
-## 検証環境の方針
+Terraformのvalidateには、各実行先でProviderの初期化が必要です。これまでの一部の検証は、初期化済みの一時ディレクトリで行っています。
 
-- dev環境のみ。Terraformは`network`・`ecs`・`incident`の3つに実行ディレクトリ・Stateを分け、最初は子モジュールを作らない。
-- 1 AZ・Public Subnet 1つ。ALB・NAT Gatewayは作成しない。
-- ECSサービス`aii-dev-ecs-service-nginx`の定義を作成済み。既存クラスター`aii-dev-ecs-cluster`とNginxタスク定義を参照し、Fargateで`desired_count = 1`を維持する。更新時の最小稼働率100%・最大200%とし、入れ替え中は最大2個が動く。オートスケーリング・ALBは追加しない。検証を終える際のサービス停止・削除手順は今後整備する。インバウンド通信は禁止する。
-- タスク用Security GroupはECS側で管理し、`vpc_id`入力変数で作成先を指定する。受信ルールは作成せず、送信は`0.0.0.0/0`宛てのTCP 443（HTTPS）のみ許可する。
-- NginxはLinux / X86_64のFargateタスクで、CPU 0.25 vCPU・メモリ512 MiBとする。タスク定義は公式イメージ`nginx:1.30.6`を指定し、ECSサービスから参照する。メモリ増加を再現するためのアプリ・構成は別途決める。
-- Nginxのログは`/aii/dev/ecs/nginx`に保存し、保存期間を3日とする。
-- ログストリーム名は`ecs/nginx/<タスクID>`。ログ送信は`non-blocking`・バッファ10 MiBとし、バッファ超過時はログが欠落し得る。
-- タスク実行用IAMロールは、Nginx用ロググループ内のログストリーム作成・ログ送信のみを許可する。
-- イメージ取得などに必要な通信は、Public IPとInternet Gateway経由で確保する。
-- Lambdaは初期構成ではVPCに接続しない。
-- Lambda関数名は`aii-dev-incident`。Python 3.14・arm64・メモリ128 MiB・タイムアウト10秒で定義し、実行ログ用グループ`/aws/lambda/aii-dev-incident`（保存期間3日）と実行ロールを接続する。現段階はアラーム名・状態・対象クラスター名・サービス名を実行ログに記録し、受信確認の結果を返す。通知全体は出力せず、ログ・メトリクス収集と分析もまだ行わない。
-- Lambda実行ロールは`aii-dev-incident-lambda-execution`。自身のロググループ内のログストリーム作成・ログ送信と、`nginx_log_group_arn`で受け取ったロググループ内のログ読み取り（`logs:GetLogEvents`）を許可する。ロググループはTerraformで作成するため、Lambdaにロググループ作成権限は付けない。Bedrock呼び出し・S3保存は、対象リソースの定義に合わせて権限を追加する。ECSのログストリーム名はタスクIDから組み立てる想定とし、一覧取得・検索の権限は付けない。ログ取得のPython処理を追加済み。環境変数`NGINX_LOG_GROUP_ARN`へ同じARNを渡し、読み取り権限の設定後にLambdaを作成する。
-- IAMは最小権限。S3はパブリックアクセスを禁止し、暗号化する。
-- 認証情報・Terraform State・機密値はGitに含めない。
+残作業は次のとおりです。
 
-命名は`aii-環境-用途`を基本とする（例：`aii-dev-vpc`）。`aii`はAWS Incident Intelligenceの略称。共通タグは`Project = aii`、`Environment = dev`、`ManagedBy = Terraform`に統一する。S3など名前の一意性が必要なリソースには識別子を追加する。
+1. 実行ロール・呼び出し権限・取得可能な情報の範囲を、ハーネスの実行要件と照らし合わせて確認する。不要になった既存コード・権限の整理も行う。
+2. 初回デプロイ・イメージのビルドとアップロード・Stateの保管・概算費用・停止と削除の手順を整える。
+3. デプロイ時にイメージ内のCLI、東京からのモデル利用可否、ハーネスの起動・ログ出力・情報取得を確認する。Lambda実行環境のSDKが`InvokeHarness`に対応しているかも確認する。
+4. SNSの購読確認後、実際のメール到着と内容を確認し、案②のアラームアクションを有効化する段階を決める。
+5. 同じ対象・負荷条件・調査時間帯で両案を比較し、原因候補と根拠、読みやすさ、所要時間、通知件数、利用料金を記録する。通常時・回復・重複配信・権限不足・モデル失敗・時間切れ・通知失敗も確認する。
 
-## Terraformのファイル構成
+**一つずつ内容を説明して進めます。AWSへの構築・課金を伴う検証は、事前に内容を確認してから行います。**
 
-以下は予定構成。現在は`network/`と`ecs/`の初期設定、ネットワーク・ECSクラスター・ログ・実行権限・正常系タスク定義・ECSサービスを作成済み。他のディレクトリ・ファイルは必要になった段階で追加し、構成が固まってからモジュール化を検討する。
+## 今回の対象外
 
-```text
-environments/dev/
-├── network/            # VPC・Subnet・通信経路
-│   ├── versions.tf     # バージョン条件・ローカルState設定（作成済み）
-│   ├── providers.tf    # AWS Provider・共通タグ（作成済み）
-│   ├── .terraform.lock.hcl # Providerの使用バージョン（作成済み）
-│   └── network.tf      # VPC・Subnet・Internet Gateway・ルート設定
-├── ecs/                # ECSクラスター・サービス・ログ・実行権限・タスク定義・Security Group
-└── incident/           # Lambda・ログ・IAM・停止イベント向けログ取得処理を作成済み。アラームと呼び出し許可は定義済み（アクション無効）。受信確認は実装済み。メトリクス収集・ログ取得の接続・Bedrock・S3は今後追加
-```
-
-各ディレクトリにProvider・バージョン設定を置き、個別にinit・plan・applyする。同じディレクトリの`.tf`ファイルはまとめて読み込まれるが、隣のディレクトリは自動では読み込まれない。CloudWatch LogsとIAMは、利用するECS・Lambda側で管理する。
-
-`incident/lambda/handler.py`がLambdaの処理本体。Archive Providerで`incident/build/incident-lambda.zip`にまとめ、コードのハッシュで変更を検知する。`build/`はGit管理対象外。ZIPはplan時に生成されるため、保存したplanをapplyする際はZIPも保持する。
-
-ネットワーク、検証タスク、障害分析という変更目的で分ける。`incident/`内は`cloudwatch.tf`・`lambda.tf`・`bedrock.tf`・`s3.tf`などに整理し、分析機能としてまとめて管理する。
-
-`incident/bedrock.tf`に`aws_bedrockagentcore_agent_runtime.incident`を定義済み。1環境で進めるため、名前・モデル・接続先は`bedrock.tf`へ直接記述する。dev/prod用の変数ファイルは追加しない。リソース間の接続に必要な入力・参照は残す。AgentCoreの命名制約に合わせ、名前は`aii_dev_bedrock_agent`とする。採用モデルはGPT-6.1 Sol（`openai.gpt-6.1-sol`）、モデルの呼び出し先はBedrock Mantleの`us-east-1`を初期設定とする。AgentCore自体は既存Providerの東京リージョンに定義する。[AWS公式モデル資料](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-1-sol.html)で提供状況を確認済みだが、利用アカウントでのアクセス可否は未確認。
-
-`iam.tf`に実行用ロール`aii-dev-bedrock-agent-execution`を定義し、`bedrock.tf`から直接参照する。現在は同一アカウント・東京リージョンのAgentCore Runtimeにロールの引き受けを許可する信頼ポリシーのみで、モデル呼び出し・イメージ取得・ログ送信・調査用の権限は未付与。`bedrock_agent_image_uri`はデフォルト値のない必須入力。ECRイメージ・調査プログラムも未実装で、applyの準備は未完了。プログラムはAgentCoreの実行要件に対応し、`MODEL_ID`と`BEDROCK_REGION`を読んでモデルを呼ぶ必要がある。環境変数を指定するだけでAIが動くわけではない。Runtimeのネットワークは`PUBLIC`で、JWT認証を設定せずIAM認証を使用する。LambdaからRuntimeを呼ぶ権限・処理も今後追加する。
-
-旧方式の`aws_bedrockagent_agent`は使わない。[Agents Classicは新規利用の受付を終了](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-classic-maintenance-mode.html)しているため、AgentCore Runtimeを採用する。
-
-入口のLambdaがアラーム情報を渡して調査を依頼し、エージェントが必要に応じて取得用ツールを呼ぶ方式とする。指示文だけで変更操作を禁止するのではなく、取得用ツールとそのIAM権限にも設定変更・再起動・停止の機能を与えない。調査結果では、確認できた事実・根拠・不明点と、優先順位を付けた対策案・想定効果・影響・確認方法を日本語でまとめる。調査ツールは既存のAWS連携機能やMCPを優先して確認し、不足する場合のみ自作を検討する。現在のコンテナ方式のRuntime定義をそのまま使用するか、管理されたエージェント実行方式へ変更するかは、その確認後に決める。
-
-Stateは各ディレクトリの`terraform.tfstate`にローカル保存する（例：`environments/dev/network/terraform.tfstate`）。Gitには含めず、AWS構築後は変更・削除に備えて保管する。各ディレクトリの`.terraform.lock.hcl`はGit管理する。
-
-ディレクトリ間で必要なSubnet ID・ARNなどは、作成元のoutputから利用側の入力へ渡す。具体的な受け渡し方法は実装時に決める。作成は依存先から、削除は利用側から行う。Stateを分けるため、全体の実行順序はTerraformが自動調整しない。
-
-network側の`vpc_id`・`public_subnet_id`出力を、ecs側の同名の入力変数へ渡す。サービスはPublic Subnetにタスクを配置し、Public IPを付与して既存Security Groupを使う。ECS側の`cluster_name`・`service_name`出力をincident側の`ecs_cluster_name`・`ecs_service_name`入力へ渡し、メモリアラームの対象指定に利用する。いずれもディレクトリ間で自動接続はされない。
-
-ECS側の`nginx_log_group_arn`出力と、incident側の同名の入力変数を定義済み。ECS側の出力値をincident側の入力へ渡す。変数を定義しただけでは自動接続されず、具体的な受け渡し手順は今後追加する。Lambda実行ロールの読み取りポリシーは、この入力変数を対象ARNとして参照する。
-
-全体の構築順は`network` → `ecs` → `incident`、削除順はその逆とする。後からモジュール化する際は、既存Stateを維持し、`moved`ブロックなどでリソースのアドレス変更に対応する。
-
-初期版はNginx公式イメージを利用するため、監視対象のNginx専用のECRリポジトリは作成しない。調査エージェント用のECRリポジトリとイメージは今後整備する。
-
-## 進め方
-
-1. この設計を確認する。
-2. ECSサービス → メモリ監視・CloudWatch AlarmからLambdaへの直接呼び出し → Lambdaの証拠収集 → Bedrock → S3の順に、一つずつ説明してコードを作成する。
-3. Terraformのfmt / validate、Pythonの単体テストでローカル検証する。
-4. リソース一覧・概算費用・State管理・削除手順を確認する。
-5. 承認後にAWSへ構築し、通常時・継続したメモリ使用率の上昇によるアラーム・回復・重複配信・ログやメトリクスの取得失敗・Bedrock失敗を検証する。
-
-**各段階の内容を説明し、了承を得てから次に進む。課金・リソース変更を伴うAWS操作は事前確認を必須とする。**
-
-## 初期版の対象外
-
-フロントエンド、独自Web API、メール・Slack通知、自動復旧、GitHub Actions、起動失敗・停止イベントを起点としたAI分析、応答遅延・HTTPエラーを起点とした検知。
+自動復旧、S3への調査結果保存、Slack通知、フロントエンド、独自Web API、CI/CDの実装、起動失敗・停止イベント・応答遅延・HTTPエラーを起点とする追加の検知です。メール通知は今回の対象に含みます。
 
 ## 参考：AWS公式
 
-- [ECSタスク状態変更イベント](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs_task_events.html)
-- [LambdaとBedrockでCloudWatchログを分析する実装例](https://aws.amazon.com/blogs/mt/using-generative-ai-to-gain-insights-into-cloudwatch-logs/)（今回と同一構成ではない）
-- [Converse API](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference.html)
+- [CloudWatch AlarmからLambdaへの直接呼び出し](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/alarms-and-actions-Lambda.html)
+- [CloudWatch investigationsのSNS連携](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Investigations-Integrations.html)
+- [CloudWatch investigationsの料金](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/investigations-costs.html)
+- [ECS調査とContainer Insights](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Investigations-Services.html)
+- [AgentCore harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html)
+- [ハーネスの実行環境とコンテナイメージ](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-environment.html)
+- [ハーネスの権限](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html)
+- [GPT-6.1 Solの提供条件](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-1-sol.html)
+- [SNSのメール購読確認](https://docs.aws.amazon.com/sns/latest/dg/sns-email-notifications.html)
