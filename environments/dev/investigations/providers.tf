@@ -9,3 +9,7 @@ provider "aws" {
     }
   }
 }
+
+provider "awscc" {
+  region = "ap-northeast-1"
+}
