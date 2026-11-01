@@ -13,11 +13,6 @@ variable "ecs_service_name" {
   type        = string
 }
 
-variable "bedrock_agent_image_uri" {
-  description = "AgentCore用の実行プログラムを含むECRコンテナイメージのURI"
-  type        = string
-}
-
 variable "budget_notification_email" {
   description = "月額予算の通知先メールアドレス"
   type        = string
