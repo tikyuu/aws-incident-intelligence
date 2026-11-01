@@ -24,6 +24,36 @@ resource "aws_iam_role" "bedrock_agent_execution" {
   })
 }
 
+# ハーネス実行ロール：今回のECRからイメージを取得する
+resource "aws_iam_role_policy" "bedrock_agent_ecr" {
+  name = "aii-dev-bedrock-agent-pull-image"
+  role = aws_iam_role.bedrock_agent_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+        ]
+        Resource = aws_ecr_repository.bedrock_agent.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = "ap-northeast-1"
+          }
+        }
+      },
+    ]
+  })
+}
+
 # ハーネス実行ロール：指定したグローバル推論でSolを呼び出す
 resource "aws_iam_role_policy" "bedrock_agent_inference" {
   name = "aii-dev-bedrock-agent-inference"
