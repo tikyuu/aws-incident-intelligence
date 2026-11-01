@@ -4,6 +4,7 @@ import json
 import os
 import re
 from datetime import datetime, timedelta
+from uuid import uuid4
 
 import boto3
 from botocore.config import Config
@@ -121,9 +122,23 @@ def lambda_handler(event, context):
         "service_name": service_name,
     }, ensure_ascii=False))
 
-    # 調査依頼の作成まで。Runtimeへの送信は今後追加する。
+    client = boto3.client("bedrock-agentcore", region_name="ap-northeast-1", config=Config(
+        connect_timeout=3, read_timeout=45,
+        retries={"total_max_attempts": 1},
+    ))
+    response = client.invoke_agent_runtime(
+        agentRuntimeArn=runtime_arn,
+        qualifier="DEFAULT",
+        runtimeSessionId=str(uuid4()),
+        contentType="application/json",
+        accept="application/json",
+        payload=json.dumps(investigation_request, ensure_ascii=False).encode("utf-8"),
+    )
+    # Runtime側は受付後すぐ応答し、調査をバックグラウンドで続ける。
+    response["response"].close()
+
     return {
-        "status": "received",
+        "status": "dispatched",
         "alarm_name": alarm_name,
         "state": state,
         "cluster_name": cluster_name,

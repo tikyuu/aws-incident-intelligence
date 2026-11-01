@@ -142,9 +142,13 @@ class AlarmReceptionTests(unittest.TestCase):
             },
         }
         output = io.StringIO()
+        runtime_client = Mock()
+        response_body = Mock()
+        runtime_client.invoke_agent_runtime.return_value = {"response": response_body}
         with (
             patch.dict(os.environ, {"AGENT_RUNTIME_ARN": "arn:aws:bedrock-agentcore:ap-northeast-1:123456789012:runtime/test-agent"}),
             patch.object(handler, "collect_nginx_logs") as collect,
+            patch.object(handler.boto3, "client", return_value=runtime_client) as create_client,
             redirect_stdout(output),
         ):
             result = handler.lambda_handler(event, None)
@@ -157,13 +161,21 @@ class AlarmReceptionTests(unittest.TestCase):
         self.assertEqual(result["cluster_name"], record["cluster_name"])
         self.assertEqual(result["service_name"], record["service_name"])
         self.assertNotIn("PRIVATE_DETAIL", output.getvalue())
-        self.assertEqual(result["status"], "received")
+        self.assertEqual(result["status"], "dispatched")
         request = result["investigation_request"]
         self.assertEqual(request["alarm_name"], event["alarmData"]["alarmName"])
         self.assertEqual(request["alarm_time"], event["alarmData"]["state"]["timestamp"])
         self.assertEqual(request["cluster_name"], "aii-dev-ecs-cluster")
         self.assertEqual(request["service_name"], "aii-dev-ecs-service-nginx")
         self.assertNotIn("PRIVATE_DETAIL", json.dumps(request))
+        self.assertEqual(create_client.call_args.args, ("bedrock-agentcore",))
+        self.assertEqual(create_client.call_args.kwargs["region_name"], "ap-northeast-1")
+        runtime_client.invoke_agent_runtime.assert_called_once()
+        invocation = runtime_client.invoke_agent_runtime.call_args.kwargs
+        self.assertEqual(invocation["agentRuntimeArn"], "arn:aws:bedrock-agentcore:ap-northeast-1:123456789012:runtime/test-agent")
+        self.assertEqual(invocation["qualifier"], "DEFAULT")
+        self.assertEqual(json.loads(invocation["payload"]), request)
+        response_body.close.assert_called_once()
 
 
 if __name__ == "__main__":

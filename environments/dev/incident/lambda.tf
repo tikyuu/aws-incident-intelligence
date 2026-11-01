@@ -6,13 +6,13 @@ data "archive_file" "incident_lambda" {
 
 resource "aws_lambda_function" "incident" {
   function_name = "aii-dev-incident"
-  description   = "Log received CloudWatch alarm notifications"
+  description   = "Forward CloudWatch alarm investigation requests to AgentCore Runtime"
   role          = aws_iam_role.lambda_execution.arn
   runtime       = "python3.14"
   handler       = "handler.lambda_handler"
   architectures = ["arm64"]
   memory_size   = 128
-  timeout       = 10
+  timeout       = 60
 
   filename         = data.archive_file.incident_lambda.output_path
   source_code_hash = data.archive_file.incident_lambda.output_base64sha256
@@ -29,10 +29,11 @@ resource "aws_lambda_function" "incident" {
     log_group  = aws_cloudwatch_log_group.lambda.name
   }
 
-  # ログ送信権限を付けてから関数を作成する。
+  # ログ送信・Runtime呼び出し権限を付けてから関数を作成する。
   # ロググループの作成順序はlogging_configの参照で保証する。
   depends_on = [
     aws_iam_role_policy.lambda_execution_logs,
+    aws_iam_role_policy.lambda_invoke_runtime,
     aws_iam_role_policy.lambda_read_nginx_logs,
   ]
 }
