@@ -23,3 +23,9 @@ variable "budget_notification_email" {
   type        = string
   sensitive   = true
 }
+
+variable "notification_email" {
+  description = "調査結果の送信先メールアドレス"
+  type        = string
+  sensitive   = true
+}
