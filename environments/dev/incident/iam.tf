@@ -65,6 +65,88 @@ resource "aws_iam_role_policy" "bedrock_agent_metrics" {
   })
 }
 
+# Runtime実行ロール：Nginxのログを検索する
+resource "aws_iam_role_policy" "bedrock_agent_logs" {
+  name = "aii-dev-bedrock-agent-read-nginx-logs"
+  role = aws_iam_role.bedrock_agent_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:StartQuery",
+          "logs:GetQueryResults",
+          "logs:FilterLogEvents",
+        ]
+        Resource = "${var.nginx_log_group_arn}:*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:DescribeLogGroups",
+          "logs:StopQuery",
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = "ap-northeast-1"
+          }
+        }
+      },
+    ]
+  })
+}
+
+# Runtime実行ロール：ECSの構成・状態を読む
+resource "aws_iam_role_policy" "bedrock_agent_ecs" {
+  name = "aii-dev-bedrock-agent-read-ecs"
+  role = aws_iam_role.bedrock_agent_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ecs:DescribeClusters",
+          "ecs:DescribeServices",
+          "ecs:DescribeTasks",
+        ]
+        Resource = [
+          "arn:aws:ecs:ap-northeast-1:${data.aws_caller_identity.current.account_id}:cluster/${var.ecs_cluster_name}",
+          "arn:aws:ecs:ap-northeast-1:${data.aws_caller_identity.current.account_id}:service/${var.ecs_cluster_name}/${var.ecs_service_name}",
+          "arn:aws:ecs:ap-northeast-1:${data.aws_caller_identity.current.account_id}:task/${var.ecs_cluster_name}/*",
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecs:ListServices",
+          "ecs:ListTasks",
+        ]
+        Resource = "*"
+        Condition = {
+          ArnEquals = {
+            "ecs:cluster" = "arn:aws:ecs:ap-northeast-1:${data.aws_caller_identity.current.account_id}:cluster/${var.ecs_cluster_name}"
+          }
+        }
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["ecs:DescribeTaskDefinition"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = "ap-northeast-1"
+          }
+        }
+      },
+    ]
+  })
+}
+
 resource "aws_iam_role" "lambda_execution" {
   name = "aii-dev-incident-lambda-execution"
 
