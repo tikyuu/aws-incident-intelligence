@@ -165,7 +165,7 @@ Providerは東京を指定しています。案①はAWS Providerに加えてAWS
 
 構築は`network` → `ecs` → 比較する調査側の順、削除は調査側 → `ecs` → `network`です。調査側のうち`incident`には、ECRの先行作成とイメージのアップロードが必要です。Stateが分かれているため、実行順は自動調整されません。ECR内のイメージを含め、具体的な削除手順は構築前に確認します。
 
-LambdaはArchive Providerで`incident/build/incident-lambda.zip`にまとめます。`build/`はGit管理対象外です。保存したplanをapplyする場合は、対応するZIPも保持する必要があります。
+Lambdaはデプロイ時に`incident/lambda/build.py`を実行し、`requirements.txt`に指定したSDKと関連ライブラリ、`handler.py`を`incident/build/incident-lambda.zip`にまとめます。TerraformはこのZIPを読み込み、作成は行いません。ZIPはplan前に用意する必要があります。`build/`はGit管理対象外です。保存したplanをapplyする場合は、対応するZIPも保持します。
 
 命名は`aii-環境-用途`を基本とします。`aii`はAWS Incident Intelligenceの略称です。共通タグは`Project = aii`、`Environment = dev`、`ManagedBy = Terraform`です。ハーネス名はサービスの命名制約に合わせてアンダースコアを使用します。
 
