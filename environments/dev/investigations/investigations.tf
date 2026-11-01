@@ -1,6 +1,7 @@
 resource "awscc_aiops_investigation_group" "investigations" {
   name                                 = "aii-dev-investigations"
   role_arn                             = aws_iam_role.investigations.arn
+  investigation_group_policy           = data.aws_iam_policy_document.investigations_alarm.json
   is_cloud_trail_event_history_enabled = false
 
   chatbot_notification_channels = [{

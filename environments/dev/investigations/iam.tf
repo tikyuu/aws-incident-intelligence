@@ -1,5 +1,34 @@
 data "aws_caller_identity" "current" {}
 
+# 調査グループ：メモリアラームからの調査開始・イベント追加を受け付ける
+data "aws_iam_policy_document" "investigations_alarm" {
+  statement {
+    effect = "Allow"
+    principals {
+      type        = "Service"
+      identifiers = ["aiops.alarms.cloudwatch.amazonaws.com"]
+    }
+    actions = [
+      "aiops:CreateInvestigation",
+      "aiops:CreateInvestigationEvent",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+
+    condition {
+      test     = "ArnEquals"
+      variable = "aws:SourceArn"
+      values   = ["arn:aws:cloudwatch:ap-northeast-1:${data.aws_caller_identity.current.account_id}:alarm:aii-dev-investigations-ecs-memory-high"]
+    }
+  }
+}
+
+# AI調査用ロール：AI調査機能による利用を許可する
 resource "aws_iam_role" "investigations" {
   name = "aii-dev-cloudwatch-investigations"
 
@@ -23,6 +52,7 @@ resource "aws_iam_role" "investigations" {
   })
 }
 
+# AI調査用ロール：メトリクスを読む
 resource "aws_iam_role_policy" "investigations_metrics" {
   name = "aii-dev-investigations-read-metrics"
   role = aws_iam_role.investigations.id
@@ -46,6 +76,7 @@ resource "aws_iam_role_policy" "investigations_metrics" {
   })
 }
 
+# AI調査用ロール：Nginxのログを検索する
 resource "aws_iam_role_policy" "investigations_logs" {
   name = "aii-dev-investigations-read-nginx-logs"
   role = aws_iam_role.investigations.id
@@ -78,6 +109,7 @@ resource "aws_iam_role_policy" "investigations_logs" {
   })
 }
 
+# AI調査用ロール：ECSの構成・状態を読む
 resource "aws_iam_role_policy" "investigations_ecs" {
   name = "aii-dev-investigations-read-ecs"
   role = aws_iam_role.investigations.id
@@ -122,5 +154,27 @@ resource "aws_iam_role_policy" "investigations_ecs" {
         }
       },
     ]
+  })
+}
+
+# SNS：AI調査からの通知を受け付ける
+resource "aws_sns_topic_policy" "investigations" {
+  arn = aws_sns_topic.investigations.arn
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "aiops.amazonaws.com"
+      }
+      Action   = "sns:Publish"
+      Resource = aws_sns_topic.investigations.arn
+      Condition = {
+        StringEquals = {
+          "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+        }
+      }
+    }]
   })
 }
