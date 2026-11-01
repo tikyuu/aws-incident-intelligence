@@ -157,7 +157,7 @@
         <mxCell id="n8" value="" style="rounded=1;arcSize=10;fillColor=#FAF8FD;strokeColor=#DBD1ED;strokeWidth=1.5;dashed=0;" vertex="1" parent="1">
           <mxGeometry as="geometry" x="1200" y="430" width="360" height="240" />
         </mxCell>
-        <mxCell id="n9" value="AWS  /  米国東部" style="text;html=0;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;fontFamily=Hiragino Sans;fontSize=18;fontColor=#7051B5;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="n9" value="Bedrock  /  グローバル推論" style="text;html=0;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;fontFamily=Hiragino Sans;fontSize=18;fontColor=#7051B5;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry as="geometry" x="1224" y="450" width="315" height="28" />
         </mxCell>
         <mxCell id="n10" value="" style="rounded=1;arcSize=10;fillColor=#FFFFFF;strokeColor=#C5D8DC;strokeWidth=1.5;dashed=0;" vertex="1" parent="1">
@@ -327,6 +327,9 @@
         </mxCell>
         <mxCell id="harness-runtime-label" value="実行基盤：Runtime" style="text;html=0;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;fontFamily=Hiragino Sans;fontSize=15;fontColor=#52647B;" vertex="1" parent="1">
           <mxGeometry as="geometry" x="812" y="586" width="266" height="25" />
+        </mxCell>
+        <mxCell id="bedrock-global-routing-label" value="推論先はAWSが選択" style="text;html=0;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;fontFamily=Hiragino Sans;fontSize=14;fontColor=#52647B;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1252" y="618" width="256" height="24" />
         </mxCell>
       </root>
     </mxGraphModel>
