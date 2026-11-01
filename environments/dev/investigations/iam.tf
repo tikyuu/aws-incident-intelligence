@@ -22,3 +22,58 @@ resource "aws_iam_role" "investigations" {
     }]
   })
 }
+
+resource "aws_iam_role_policy" "investigations_metrics" {
+  name = "aii-dev-investigations-read-metrics"
+  role = aws_iam_role.investigations.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "cloudwatch:ListMetrics",
+        "cloudwatch:GetMetricData",
+        "cloudwatch:GetMetricStatistics",
+      ]
+      Resource = "*"
+      Condition = {
+        StringEquals = {
+          "aws:RequestedRegion" = "ap-northeast-1"
+        }
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "investigations_logs" {
+  name = "aii-dev-investigations-read-nginx-logs"
+  role = aws_iam_role.investigations.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:StartQuery",
+          "logs:GetQueryResults",
+        ]
+        Resource = "arn:aws:logs:ap-northeast-1:${data.aws_caller_identity.current.account_id}:log-group:/aii/dev/ecs/nginx:*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:DescribeLogGroups",
+          "logs:StopQuery",
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = "ap-northeast-1"
+          }
+        }
+      },
+    ]
+  })
+}
