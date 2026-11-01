@@ -147,6 +147,21 @@ resource "aws_iam_role_policy" "bedrock_agent_ecs" {
   })
 }
 
+# Runtime実行ロール：調査結果をSNSへ送る
+resource "aws_iam_role_policy" "bedrock_agent_notifications" {
+  name = "aii-dev-bedrock-agent-publish-notifications"
+  role = aws_iam_role.bedrock_agent_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["sns:Publish"]
+      Resource = aws_sns_topic.incident.arn
+    }]
+  })
+}
+
 resource "aws_iam_role" "lambda_execution" {
   name = "aii-dev-incident-lambda-execution"
 
@@ -162,7 +177,24 @@ resource "aws_iam_role" "lambda_execution" {
     }]
   })
 
-  # Bedrock呼び出し・S3保存の権限は今後追加する。
+}
+
+# Lambda実行ロール：今回のRuntimeへ調査を依頼する
+resource "aws_iam_role_policy" "lambda_invoke_runtime" {
+  name = "aii-dev-incident-lambda-invoke-runtime"
+  role = aws_iam_role.lambda_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = ["bedrock-agentcore:InvokeAgentRuntime"]
+      Resource = [
+        aws_bedrockagentcore_agent_runtime.incident.agent_runtime_arn,
+        "${aws_bedrockagentcore_agent_runtime.incident.agent_runtime_arn}/runtime-endpoint/DEFAULT",
+      ]
+    }]
+  })
 }
 
 resource "aws_iam_role_policy" "lambda_execution_logs" {
