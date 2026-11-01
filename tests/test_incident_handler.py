@@ -118,7 +118,11 @@ class AlarmReceptionTests(unittest.TestCase):
         event = {
             "alarmData": {
                 "alarmName": "aii-dev-ecs-memory-high",
-                "state": {"value": "ALARM", "reason": "PRIVATE_DETAIL"},
+                "state": {
+                    "value": "ALARM",
+                    "reason": "PRIVATE_DETAIL",
+                    "timestamp": "2026-11-01T05:00:00.000+0000",
+                },
                 "configuration": {
                     "metrics": [{
                         "metricStat": {
@@ -154,6 +158,12 @@ class AlarmReceptionTests(unittest.TestCase):
         self.assertEqual(result["service_name"], record["service_name"])
         self.assertNotIn("PRIVATE_DETAIL", output.getvalue())
         self.assertEqual(result["status"], "received")
+        request = result["investigation_request"]
+        self.assertEqual(request["alarm_name"], event["alarmData"]["alarmName"])
+        self.assertEqual(request["alarm_time"], event["alarmData"]["state"]["timestamp"])
+        self.assertEqual(request["cluster_name"], "aii-dev-ecs-cluster")
+        self.assertEqual(request["service_name"], "aii-dev-ecs-service-nginx")
+        self.assertNotIn("PRIVATE_DETAIL", json.dumps(request))
 
 
 if __name__ == "__main__":

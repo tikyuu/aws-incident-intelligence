@@ -96,12 +96,21 @@ def lambda_handler(event, context):
 
     alarm_name = alarm["alarmName"]
     state = alarm["state"]["value"]
+    alarm_time = alarm["state"]["timestamp"]
 
     # 今回のアラームは、ECSのメモリメトリクス1つを監視する。
     metric = alarm["configuration"]["metrics"][0]["metricStat"]["metric"]
     dimensions = metric["dimensions"]
     cluster_name = dimensions["ClusterName"]
     service_name = dimensions["ServiceName"]
+
+    investigation_request = {
+        "instruction": "このアラームの原因候補と対策を調査してください。",
+        "alarm_name": alarm_name,
+        "alarm_time": alarm_time,
+        "cluster_name": cluster_name,
+        "service_name": service_name,
+    }
 
     # 通知全体ではなく、受信確認に必要な項目だけを記録する。
     print(json.dumps({
@@ -112,11 +121,12 @@ def lambda_handler(event, context):
         "service_name": service_name,
     }, ensure_ascii=False))
 
-    # 受信確認まで。メトリクス・ログ取得とBedrock分析は今後追加する。
+    # 調査依頼の作成まで。Runtimeへの送信は今後追加する。
     return {
         "status": "received",
         "alarm_name": alarm_name,
         "state": state,
         "cluster_name": cluster_name,
         "service_name": service_name,
+        "investigation_request": investigation_request,
     }
