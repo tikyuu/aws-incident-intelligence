@@ -8,6 +8,10 @@ resource "aws_bedrockagentcore_harness" "incident" {
     }
   }
 
+  environment_variables = {
+    SNS_TOPIC_ARN = aws_sns_topic.incident.arn
+  }
+
   model {
     bedrock_model_config {
       model_id   = "global.openai.gpt-6.1-sol"
