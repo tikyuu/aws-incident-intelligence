@@ -1,9 +1,3 @@
-data "archive_file" "incident_lambda" {
-  type        = "zip"
-  source_file = "${path.module}/lambda/handler.py"
-  output_path = "${path.module}/build/incident-lambda.zip"
-}
-
 resource "aws_lambda_function" "incident" {
   function_name = "aii-dev-incident"
   description   = "Send CloudWatch alarm investigation requests to AgentCore harness"
@@ -14,8 +8,8 @@ resource "aws_lambda_function" "incident" {
   memory_size   = 128
   timeout       = 360
 
-  filename         = data.archive_file.incident_lambda.output_path
-  source_code_hash = data.archive_file.incident_lambda.output_base64sha256
+  filename         = "${path.module}/build/incident-lambda.zip"
+  source_code_hash = filebase64sha256("${path.module}/build/incident-lambda.zip")
 
   environment {
     variables = {
