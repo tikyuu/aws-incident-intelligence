@@ -22,9 +22,28 @@ ECSサービスのTerraform定義は作成済み。Lambdaはアラームの受�
 
 ## 構成と役割
 
+現在は構成の比較検証を計画している段階です。まずCloudWatch investigationsによる専用AI調査とメール通知を試し、その結果を確認してからBedrock版を検証します。S3への調査結果保存は今回の比較案から外します。以下の旧案は比較用に残しており、採用決定を意味しません。Terraform・Pythonには、まだ比較案の変更を反映していません。
+
+![比較案A：CloudWatchの専用AI調査とメール通知](docs/architecture-investigations.png)
+
+[比較案AのSVG](docs/architecture-investigations.svg)もあります。[draw.ioファイル](docs/architecture.drawio)には、先頭に「① CloudWatch案」、2枚目に既存の「② Bedrock旧案」を配置しています。シートはdraw.io画面下部のタブで切り替えます。図にはサービスと処理の流れを中心に表示し、詳細な検証項目はこのREADMEに記載しています。
+
+比較案Aは「メモリアラーム → CloudWatch investigations → SNSの調査更新通知 → Lambdaで整形 → 別のSNS通知先からメール配信」です。SNSは通知を届けるサービスです。専用調査機能から通知を受け取って処理する方式は[AWS公式ブログ](https://aws.amazon.com/blogs/mt/reimagine-aiops-with-amazon-cloudwatch-investigations-and-amazon-nova-sonic/)と[公式サンプル](https://github.com/aws-samples/sample-intelligent-ops/blob/main/cf-template.yml)を参考にしています。調査更新に含まれる情報が、希望するメール項目を満たすかは未検証です。
+
+AWS上のテストは未実施です。AWS構築前に利用料金と停止・削除手順を確認し、検証は次の順に進めます。
+
+1. 調査対象への権限を読み取りに限定し、検証用ECSサービスで既知のメモリ負荷を発生させ、80%超過によるアラームから調査が自動開始されることを確認する。
+2. 専用調査機能の通知データを確認し、検知内容・根拠となるログやメトリクス・原因候補・対策案の有無を記録する。原因を特定できなければ、その旨をメールに明記する。通知データだけでは項目を満たせない場合は、不足を記録し、推測で補完して実装完了としない。
+3. 後で設定する宛先へメールを送信できることを確認し、調査更新と、原因候補の承認を伴う正式な事後レポートを区別する。重複通知、調査や配信の失敗時の動作も確認する。
+4. 検知から通知までの時間・通知件数・データ取得量・利用料金を記録する。その後、負荷条件・対象サービス・調査対象時間帯を揃えてBedrock版と比較する。Bedrock版のモデルや実行方式は、比較案Aの結果を確認してから決める。
+
+専用調査機能には[関連API等の利用料金](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/investigations-costs.html)が発生する場合があります。ECSの調査品質を高めるために[Container Insightsの有効化が推奨](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Investigations-Services.html)されていますが、現在は無効です。有効化の要否と追加費用は構築前に確認します。
+
+以下は保存している旧案です。
+
 ![メモリアラームからAI調査とレポート保存までの完成予定構成](docs/architecture.png)
 
-[draw.ioで編集するファイル](docs/architecture.drawio)・[拡大表示用SVG](docs/architecture.svg)もあります。図はメモリアラームを起点にした完成予定構成です。東京のVPCとマネージドサービス、米国東部のモデル呼び出し先を分け、基本の観測・通知経路を実線、計画中のAI調査・保存経路を点線で示しています。各カードに実装状況を表示しており、AWS上での稼働確認済みを意味しません。Gateway連携とエージェント実行方式は設計段階です。
+[draw.ioで編集するファイル](docs/architecture.drawio)・[拡大表示用SVG](docs/architecture.svg)もあります。「② Bedrock旧案」は、既存設計のサービスと役割を簡略化して表示しています。東京の調査処理と米国東部のモデル呼び出し先を分け、観測経路を実線、計画中の調査・保存経路を点線で示しています。詳細な設定値や実装状況の表示は省略しており、AWS上での動作は未検証です。旧案のS3は比較用に残していますが、今回先に試す「① CloudWatch案」にはS3保存を含めません。
 
 CloudWatchは1つの枠にまとめ、その中にAlarmとLogs / Metricsを表示しています。AgentCore Runtimeはエージェントを動かす場所、AgentCore Gatewayは調査APIへの窓口として、箱の見出しで区別しています。
 
