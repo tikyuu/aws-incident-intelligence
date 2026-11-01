@@ -81,6 +81,33 @@ resource "aws_iam_role_policy" "bedrock_agent_inference" {
   })
 }
 
+# ハーネス実行ロール：東京のAgentCore動作ログを記録する
+resource "aws_iam_role_policy" "bedrock_agent_execution_logs" {
+  name = "aii-dev-bedrock-agent-write-logs"
+  role = aws_iam_role.bedrock_agent_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:DescribeLogStreams",
+        ]
+        Resource = aws_cloudwatch_log_group.bedrock_agent.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ]
+        Resource = "${aws_cloudwatch_log_group.bedrock_agent.arn}:log-stream:*"
+      },
+    ]
+  })
+}
+
 # Runtime実行ロール：東京のメトリクスを読む
 resource "aws_iam_role_policy" "bedrock_agent_metrics" {
   name = "aii-dev-bedrock-agent-read-metrics"

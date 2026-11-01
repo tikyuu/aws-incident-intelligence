@@ -35,6 +35,7 @@ resource "aws_lambda_function" "incident" {
     aws_iam_role_policy.lambda_execution_logs,
     aws_iam_role_policy.lambda_invoke_harness,
     aws_iam_role_policy.lambda_read_nginx_logs,
+    aws_iam_role_policy.bedrock_agent_execution_logs,
   ]
 }
 
