@@ -144,9 +144,14 @@ class AlarmReceptionTests(unittest.TestCase):
         output = io.StringIO()
         runtime_client = Mock()
         response_body = Mock()
-        runtime_client.invoke_agent_runtime.return_value = {"response": response_body}
+        response_body.__iter__ = Mock(return_value=iter([
+            {"contentBlockDelta": {"delta": {"text": "PRIVATE_FINDINGS"}}},
+            {"messageStop": {"stopReason": "tool_use"}},
+            {"messageStop": {"stopReason": "end_turn"}},
+        ]))
+        runtime_client.invoke_harness.return_value = {"stream": response_body}
         with (
-            patch.dict(os.environ, {"AGENT_RUNTIME_ARN": "arn:aws:bedrock-agentcore:ap-northeast-1:123456789012:runtime/test-agent"}),
+            patch.dict(os.environ, {"HARNESS_ARN": "arn:aws:bedrock-agentcore:ap-northeast-1:123456789012:harness/test-agent"}),
             patch.object(handler, "collect_nginx_logs") as collect,
             patch.object(handler.boto3, "client", return_value=runtime_client) as create_client,
             redirect_stdout(output),
@@ -161,7 +166,8 @@ class AlarmReceptionTests(unittest.TestCase):
         self.assertEqual(result["cluster_name"], record["cluster_name"])
         self.assertEqual(result["service_name"], record["service_name"])
         self.assertNotIn("PRIVATE_DETAIL", output.getvalue())
-        self.assertEqual(result["status"], "dispatched")
+        self.assertNotIn("PRIVATE_FINDINGS", output.getvalue())
+        self.assertEqual(result["status"], "completed")
         request = result["investigation_request"]
         self.assertEqual(request["alarm_name"], event["alarmData"]["alarmName"])
         self.assertEqual(request["alarm_time"], event["alarmData"]["state"]["timestamp"])
@@ -170,12 +176,51 @@ class AlarmReceptionTests(unittest.TestCase):
         self.assertNotIn("PRIVATE_DETAIL", json.dumps(request))
         self.assertEqual(create_client.call_args.args, ("bedrock-agentcore",))
         self.assertEqual(create_client.call_args.kwargs["region_name"], "ap-northeast-1")
-        runtime_client.invoke_agent_runtime.assert_called_once()
-        invocation = runtime_client.invoke_agent_runtime.call_args.kwargs
-        self.assertEqual(invocation["agentRuntimeArn"], "arn:aws:bedrock-agentcore:ap-northeast-1:123456789012:runtime/test-agent")
-        self.assertEqual(invocation["qualifier"], "DEFAULT")
-        self.assertEqual(json.loads(invocation["payload"]), request)
+        runtime_client.invoke_harness.assert_called_once()
+        runtime_client.invoke_agent_runtime.assert_not_called()
+        invocation = runtime_client.invoke_harness.call_args.kwargs
+        self.assertEqual(invocation["harnessArn"], "arn:aws:bedrock-agentcore:ap-northeast-1:123456789012:harness/test-agent")
+        self.assertGreaterEqual(len(invocation["runtimeSessionId"]), 33)
+        self.assertEqual(invocation["messages"][0]["role"], "user")
+        self.assertEqual(json.loads(invocation["messages"][0]["content"][0]["text"]), request)
         response_body.close.assert_called_once()
+
+        for events in (
+            [],
+            [{"messageStop": {"stopReason": "timeout_exceeded"}}],
+            [{"messageStop": {"stopReason": "tool_use"}}],
+            [{"runtimeClientError": {"message": "PRIVATE_ERROR"}}],
+        ):
+            with self.subTest(events=events):
+                stream = Mock()
+                stream.__iter__ = Mock(return_value=iter(events))
+                runtime_client.invoke_harness.return_value = {"stream": stream}
+                failure_output = io.StringIO()
+                with (
+                    patch.dict(os.environ, {"HARNESS_ARN": invocation["harnessArn"]}),
+                    patch.object(handler.boto3, "client", return_value=runtime_client),
+                    redirect_stdout(failure_output),
+                    self.assertRaises(RuntimeError),
+                ):
+                    handler.lambda_handler(event, None)
+                stream.close.assert_called_once()
+                self.assertIn("Harness investigation failed", failure_output.getvalue())
+                self.assertNotIn("PRIVATE_ERROR", failure_output.getvalue())
+
+        runtime_client.invoke_harness.side_effect = ClientError(
+            {"Error": {"Code": "AccessDeniedException", "Message": "PRIVATE_ERROR"}},
+            "InvokeHarness",
+        )
+        failure_output = io.StringIO()
+        with (
+            patch.dict(os.environ, {"HARNESS_ARN": invocation["harnessArn"]}),
+            patch.object(handler.boto3, "client", return_value=runtime_client),
+            redirect_stdout(failure_output),
+            self.assertRaises(ClientError),
+        ):
+            handler.lambda_handler(event, None)
+        self.assertIn("Harness investigation failed", failure_output.getvalue())
+        self.assertNotIn("PRIVATE_ERROR", failure_output.getvalue())
 
 
 if __name__ == "__main__":

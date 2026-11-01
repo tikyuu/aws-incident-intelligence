@@ -6,20 +6,20 @@ data "archive_file" "incident_lambda" {
 
 resource "aws_lambda_function" "incident" {
   function_name = "aii-dev-incident"
-  description   = "Forward CloudWatch alarm investigation requests to AgentCore Runtime"
+  description   = "Send CloudWatch alarm investigation requests to AgentCore harness"
   role          = aws_iam_role.lambda_execution.arn
   runtime       = "python3.14"
   handler       = "handler.lambda_handler"
   architectures = ["arm64"]
   memory_size   = 128
-  timeout       = 60
+  timeout       = 360
 
   filename         = data.archive_file.incident_lambda.output_path
   source_code_hash = data.archive_file.incident_lambda.output_base64sha256
 
   environment {
     variables = {
-      AGENT_RUNTIME_ARN   = aws_bedrockagentcore_agent_runtime.incident.agent_runtime_arn
+      HARNESS_ARN         = aws_bedrockagentcore_harness.incident.arn
       NGINX_LOG_GROUP_ARN = var.nginx_log_group_arn
     }
   }
@@ -29,7 +29,7 @@ resource "aws_lambda_function" "incident" {
     log_group  = aws_cloudwatch_log_group.lambda.name
   }
 
-  # ログ送信・Runtime呼び出し権限を付けてから関数を作成する。
+  # ログ送信・ハーネス呼び出し権限を付けてから関数を作成する。
   # ロググループの作成順序はlogging_configの参照で保証する。
   depends_on = [
     aws_iam_role_policy.lambda_execution_logs,

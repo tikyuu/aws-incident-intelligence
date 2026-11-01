@@ -1,4 +1,4 @@
-"""CloudWatch Alarmの通知を受信する。証拠収集と分析は今後接続する。"""
+"""CloudWatch Alarmの通知を受け取り、ハーネスへ調査を依頼する。"""
 
 import json
 import os
@@ -92,7 +92,7 @@ def collect_nginx_logs(event, client=None):
 
 
 def lambda_handler(event, context):
-    runtime_arn = os.environ["AGENT_RUNTIME_ARN"]
+    harness_arn = os.environ["HARNESS_ARN"]
     alarm = event["alarmData"]
 
     alarm_name = alarm["alarmName"]
@@ -123,22 +123,43 @@ def lambda_handler(event, context):
     }, ensure_ascii=False))
 
     client = boto3.client("bedrock-agentcore", region_name="ap-northeast-1", config=Config(
-        connect_timeout=3, read_timeout=45,
+        connect_timeout=3, read_timeout=330,
         retries={"total_max_attempts": 1},
     ))
-    response = client.invoke_agent_runtime(
-        agentRuntimeArn=runtime_arn,
-        qualifier="DEFAULT",
-        runtimeSessionId=str(uuid4()),
-        contentType="application/json",
-        accept="application/json",
-        payload=json.dumps(investigation_request, ensure_ascii=False).encode("utf-8"),
-    )
-    # Runtime側は受付後すぐ応答し、調査をバックグラウンドで続ける。
-    response["response"].close()
+    try:
+        response = client.invoke_harness(
+            harnessArn=harness_arn,
+            runtimeSessionId=str(uuid4()),
+            messages=[{
+                "role": "user",
+                "content": [{"text": json.dumps(investigation_request, ensure_ascii=False)}],
+            }],
+        )
+        stream = response["stream"]
+        stop_reason = None
+        try:
+            # 調査内容の本文はログへ出さず、最後まで応答を受け取る。
+            for event in stream:
+                if any(key in event for key in (
+                    "runtimeClientError", "internalServerException", "validationException",
+                )):
+                    raise RuntimeError("Harness execution failed")
+                if "messageStop" in event:
+                    stop_reason = event["messageStop"]["stopReason"]
+        finally:
+            stream.close()
+        if stop_reason != "end_turn":
+            raise RuntimeError("Harness investigation did not complete")
+    except (ClientError, BotoCoreError, RuntimeError) as exc:
+        print(json.dumps({
+            "message": "Harness investigation failed",
+            "alarm_name": alarm_name,
+            "error_type": type(exc).__name__,
+        }, ensure_ascii=False))
+        raise
 
     return {
-        "status": "dispatched",
+        "status": "completed",
         "alarm_name": alarm_name,
         "state": state,
         "cluster_name": cluster_name,
