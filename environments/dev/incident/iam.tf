@@ -24,23 +24,30 @@ resource "aws_iam_role" "bedrock_agent_execution" {
   })
 }
 
+# ハーネス実行ロール：指定したグローバル推論でSolを呼び出す
 resource "aws_iam_role_policy" "bedrock_agent_inference" {
   name = "aii-dev-bedrock-agent-inference"
   role = aws_iam_role.bedrock_agent_execution.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["bedrock-mantle:CreateInference"]
-      Resource = "*"
-      Condition = {
-        StringEquals = {
-          "bedrock-mantle:Model" = "openai.gpt-6.1-sol"
-          "aws:RequestedRegion"  = "us-east-1"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["bedrock:InvokeModelWithResponseStream"]
+        Resource = "arn:aws:bedrock:ap-northeast-1:${data.aws_caller_identity.current.account_id}:inference-profile/global.openai.gpt-6.1-sol"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["bedrock:InvokeModelWithResponseStream"]
+        Resource = "arn:aws:bedrock:*::foundation-model/openai.gpt-6.1-sol"
+        Condition = {
+          ArnEquals = {
+            "bedrock:InferenceProfileArn" = "arn:aws:bedrock:ap-northeast-1:${data.aws_caller_identity.current.account_id}:inference-profile/global.openai.gpt-6.1-sol"
+          }
         }
-      }
-    }]
+      },
+    ]
   })
 }
 
@@ -182,20 +189,20 @@ resource "aws_iam_role" "lambda_execution" {
 
 }
 
-# Lambda実行ロール：今回のRuntimeへ調査を依頼する
-resource "aws_iam_role_policy" "lambda_invoke_runtime" {
-  name = "aii-dev-incident-lambda-invoke-runtime"
+# Lambda実行ロール：今回のハーネスへ調査を依頼する
+resource "aws_iam_role_policy" "lambda_invoke_harness" {
+  name = "aii-dev-incident-lambda-invoke-harness"
   role = aws_iam_role.lambda_execution.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Effect = "Allow"
-      Action = ["bedrock-agentcore:InvokeAgentRuntime"]
-      Resource = [
-        aws_bedrockagentcore_agent_runtime.incident.agent_runtime_arn,
-        "${aws_bedrockagentcore_agent_runtime.incident.agent_runtime_arn}/runtime-endpoint/DEFAULT",
+      Action = [
+        "bedrock-agentcore:InvokeHarness",
+        "bedrock-agentcore:InvokeAgentRuntime",
       ]
+      Resource = aws_bedrockagentcore_harness.incident.arn
     }]
   })
 }

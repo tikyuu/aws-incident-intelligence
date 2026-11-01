@@ -33,7 +33,7 @@ resource "aws_lambda_function" "incident" {
   # ロググループの作成順序はlogging_configの参照で保証する。
   depends_on = [
     aws_iam_role_policy.lambda_execution_logs,
-    aws_iam_role_policy.lambda_invoke_runtime,
+    aws_iam_role_policy.lambda_invoke_harness,
     aws_iam_role_policy.lambda_read_nginx_logs,
   ]
 }
