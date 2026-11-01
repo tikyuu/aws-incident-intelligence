@@ -28,13 +28,15 @@ ECSサービスのTerraform定義は作成済み。Lambdaはアラームの受�
 
 [比較案AのSVG](docs/architecture-investigations.svg)もあります。[draw.ioファイル](docs/architecture.drawio)には、先頭に「① CloudWatch案」、2枚目に既存の「② Bedrock旧案」を配置しています。シートはdraw.io画面下部のタブで切り替えます。図にはサービスと処理の流れを中心に表示し、詳細な検証項目はこのREADMEに記載しています。
 
-比較案Aは「メモリアラーム → CloudWatch investigations → SNSの調査更新通知 → Lambdaで整形 → 別のSNS通知先からメール配信」です。SNSは通知を届けるサービスです。専用調査機能から通知を受け取って処理する方式は[AWS公式ブログ](https://aws.amazon.com/blogs/mt/reimagine-aiops-with-amazon-cloudwatch-investigations-and-amazon-nova-sonic/)と[公式サンプル](https://github.com/aws-samples/sample-intelligent-ops/blob/main/cf-template.yml)を参考にしています。調査更新に含まれる情報が、希望するメール項目を満たすかは未検証です。
+比較案Aは「メモリアラーム → CloudWatch investigations → SNS → メール」です。SNSは通知を届けるサービスです。まず調査更新をSNSからそのままメールへ配信し、Lambdaによる整形は追加しません。専用調査機能のSNS連携は[公式仕様](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Investigations-Integrations.html)、メール配信は[SNSの公式手順](https://docs.aws.amazon.com/sns/latest/dg/sns-email-notifications.html)を参考にします。メールが希望する項目や読みやすさを満たすか確認し、不足がある場合に整形処理を検討します。
+
+案①の設定先は`environments/dev/investigations/`、案②は既存の`environments/dev/incident/`とし、ネットワークとECSは共通で利用する予定です。案①の通知先はローカルの`terraform.tfvars`に保存し、Gitには含めません。現在は通知先の保存のみで、案①のTerraformリソースは未定義・未構築です。メール通知を構築した際には、SNSから届く購読確認メールの承認が必要です。
 
 AWS上のテストは未実施です。AWS構築前に利用料金と停止・削除手順を確認し、検証は次の順に進めます。
 
 1. 調査対象への権限を読み取りに限定し、検証用ECSサービスで既知のメモリ負荷を発生させ、80%超過によるアラームから調査が自動開始されることを確認する。
-2. 専用調査機能の通知データを確認し、検知内容・根拠となるログやメトリクス・原因候補・対策案の有無を記録する。原因を特定できなければ、その旨をメールに明記する。通知データだけでは項目を満たせない場合は、不足を記録し、推測で補完して実装完了としない。
-3. 後で設定する宛先へメールを送信できることを確認し、調査更新と、原因候補の承認を伴う正式な事後レポートを区別する。重複通知、調査や配信の失敗時の動作も確認する。
+2. 専用調査機能の通知データを確認し、検知内容・根拠となるログやメトリクス・原因候補・対策案の有無を記録する。原因が未特定の場合は、通知上どのように示されるか確認する。通知データだけでは項目を満たせない場合は、不足を記録し、推測で補完して実装完了としない。
+3. ローカル設定の宛先へメールを送信できることを確認し、調査更新と、原因候補の承認を伴う正式な事後レポートを区別する。通知本文はまず加工せず、読みやすさ、重複通知、調査や配信の失敗時の動作も確認する。
 4. 検知から通知までの時間・通知件数・データ取得量・利用料金を記録する。その後、負荷条件・対象サービス・調査対象時間帯を揃えてBedrock版と比較する。Bedrock版のモデルや実行方式は、比較案Aの結果を確認してから決める。
 
 専用調査機能には[関連API等の利用料金](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/investigations-costs.html)が発生する場合があります。ECSの調査品質を高めるために[Container Insightsの有効化が推奨](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Investigations-Services.html)されていますが、現在は無効です。有効化の要否と追加費用は構築前に確認します。
