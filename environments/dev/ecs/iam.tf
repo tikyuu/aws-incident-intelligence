@@ -34,6 +34,41 @@ resource "aws_iam_role_policy" "task_ecs_exec" {
   })
 }
 
+# タスク用ロール：ECS Execの操作ログを保存する。
+resource "aws_iam_role_policy" "task_ecs_exec_logs" {
+  name = "aii-dev-ecs-exec-write-logs"
+  role = aws_iam_role.task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["logs:DescribeLogGroups"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = "ap-northeast-1"
+          }
+        }
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["logs:DescribeLogStreams"]
+        Resource = aws_cloudwatch_log_group.nginx.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ]
+        Resource = "${aws_cloudwatch_log_group.nginx.arn}:log-stream:*"
+      },
+    ]
+  })
+}
+
 resource "aws_iam_role" "task_execution" {
   name = "aii-dev-ecs-task-execution"
 
