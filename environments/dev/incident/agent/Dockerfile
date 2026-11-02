@@ -6,7 +6,7 @@ RUN test "$(uname -m)" = "aarch64"
 # ハーネスの基本操作・AWS CLI導入に必要なパッケージ
 RUN dnf install -y \
     bash \
-    coreutils \
+    coreutils-single \
     tar \
     gzip \
     unzip \

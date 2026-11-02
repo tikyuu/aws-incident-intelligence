@@ -6,6 +6,9 @@ resource "awscc_aiops_investigation_group" "investigations" {
 
   chatbot_notification_channels = [{
     sns_topic_arn = aws_sns_topic.investigations.arn
+    chat_configuration_arns = [
+      "arn:aws:chatbot::${data.aws_caller_identity.current.account_id}:chat-configuration/slack-channel/aii-dev-investigations-slack",
+    ]
   }]
 
   depends_on = [

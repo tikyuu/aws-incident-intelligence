@@ -193,7 +193,7 @@ resource "aws_iam_role_policy" "bedrock_agent_logs" {
           "logs:GetQueryResults",
           "logs:FilterLogEvents",
         ]
-        Resource = "${var.nginx_log_group_arn}:*"
+        Resource = var.nginx_log_group_arn
       },
       {
         Effect = "Allow"
