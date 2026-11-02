@@ -129,6 +129,31 @@ resource "aws_iam_role_policy" "bedrock_agent_publish_metrics" {
   })
 }
 
+# ハーネス実行ロール：東京のX-Rayへ処理の追跡情報を送る
+resource "aws_iam_role_policy" "bedrock_agent_tracing" {
+  name = "aii-dev-bedrock-agent-tracing"
+  role = aws_iam_role.bedrock_agent_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "xray:PutTraceSegments",
+        "xray:PutTelemetryRecords",
+        "xray:GetSamplingRules",
+        "xray:GetSamplingTargets",
+      ]
+      Resource = "*"
+      Condition = {
+        StringEquals = {
+          "aws:RequestedRegion" = "ap-northeast-1"
+        }
+      }
+    }]
+  })
+}
+
 # Runtime実行ロール：東京のメトリクスを読む
 resource "aws_iam_role_policy" "bedrock_agent_metrics" {
   name = "aii-dev-bedrock-agent-read-metrics"
