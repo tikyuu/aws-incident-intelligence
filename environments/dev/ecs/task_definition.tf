@@ -5,13 +5,13 @@ resource "aws_ecs_task_definition" "nginx" {
   cpu                      = "256"
   memory                   = "512"
   execution_role_arn       = aws_iam_role.task_execution.arn
+  task_role_arn            = aws_iam_role.task.arn
 
   runtime_platform {
     operating_system_family = "LINUX"
     cpu_architecture        = "X86_64"
   }
 
-  # Nginx自身はAWS APIを使わないため、task_role_arnは設定しない。
   container_definitions = jsonencode([
     {
       name      = "nginx"

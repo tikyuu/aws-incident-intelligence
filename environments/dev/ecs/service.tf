@@ -4,6 +4,8 @@ resource "aws_ecs_service" "nginx" {
   task_definition = aws_ecs_task_definition.nginx.arn
   launch_type     = "FARGATE"
 
+  enable_execute_command = true
+
   # 一度起動するだけでなく、タスク1個が動いている状態を維持する。
   desired_count = 1
 
