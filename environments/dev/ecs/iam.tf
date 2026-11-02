@@ -50,6 +50,31 @@ resource "aws_iam_role" "task_execution" {
   })
 }
 
+# タスク実行ロール：Nginx用ECRからイメージを取得する。
+resource "aws_iam_role_policy" "task_execution_ecr" {
+  name = "aii-dev-ecs-pull-nginx-image"
+  role = aws_iam_role.task_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+        ]
+        Resource = aws_ecr_repository.nginx.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+    ]
+  })
+}
+
 resource "aws_iam_role_policy" "task_execution_logs" {
   name = "aii-dev-ecs-write-nginx-logs"
   role = aws_iam_role.task_execution.id
