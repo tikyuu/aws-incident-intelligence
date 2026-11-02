@@ -108,6 +108,27 @@ resource "aws_iam_role_policy" "bedrock_agent_execution_logs" {
   })
 }
 
+# ハーネス実行ロール：自身の稼働状況を東京のCloudWatchへ送る
+resource "aws_iam_role_policy" "bedrock_agent_publish_metrics" {
+  name = "aii-dev-bedrock-agent-publish-metrics"
+  role = aws_iam_role.bedrock_agent_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["cloudwatch:PutMetricData"]
+      Resource = "*"
+      Condition = {
+        StringEquals = {
+          "cloudwatch:namespace" = "bedrock-agentcore"
+          "aws:RequestedRegion"  = "ap-northeast-1"
+        }
+      }
+    }]
+  })
+}
+
 # Runtime実行ロール：東京のメトリクスを読む
 resource "aws_iam_role_policy" "bedrock_agent_metrics" {
   name = "aii-dev-bedrock-agent-read-metrics"

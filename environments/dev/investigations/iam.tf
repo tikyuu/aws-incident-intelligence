@@ -89,6 +89,7 @@ resource "aws_iam_role_policy" "investigations_logs" {
         Action = [
           "logs:StartQuery",
           "logs:GetQueryResults",
+          "logs:FilterLogEvents",
         ]
         Resource = "arn:aws:logs:ap-northeast-1:${data.aws_caller_identity.current.account_id}:log-group:/aii/dev/ecs/nginx:*"
       },
