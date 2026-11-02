@@ -15,7 +15,7 @@ resource "aws_ecs_task_definition" "nginx" {
   container_definitions = jsonencode([
     {
       name      = "nginx"
-      image     = "nginx:1.30.6"
+      image     = "${aws_ecr_repository.nginx.repository_url}:v1"
       essential = true
 
       logConfiguration = {
@@ -31,6 +31,10 @@ resource "aws_ecs_task_definition" "nginx" {
     }
   ])
 
-  # ロールにログ送信権限を付けてからタスク定義を登録する。
-  depends_on = [aws_iam_role_policy.task_execution_logs]
+  # 必要な権限を付けてからタスク定義を登録する。
+  depends_on = [
+    aws_iam_role_policy.task_execution_logs,
+    aws_iam_role_policy.task_execution_ecr,
+    aws_iam_role_policy.task_ecs_exec,
+  ]
 }
