@@ -36,5 +36,6 @@ resource "aws_ecs_task_definition" "nginx" {
     aws_iam_role_policy.task_execution_logs,
     aws_iam_role_policy.task_execution_ecr,
     aws_iam_role_policy.task_ecs_exec,
+    aws_iam_role_policy.task_ecs_exec_logs,
   ]
 }
