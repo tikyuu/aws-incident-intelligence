@@ -6,8 +6,8 @@ resource "aws_ecs_service" "nginx" {
 
   enable_execute_command = true
 
-  # 一度起動するだけでなく、タスク1個が動いている状態を維持する。
-  desired_count = 1
+  # 検証を一時停止中。再開時に1へ戻してタスクを起動する。
+  desired_count = 0
 
   # 更新時は新しいタスクを起動してから古いタスクを停止する。
   # 通常は1個だが、入れ替え中は最大2個になる。

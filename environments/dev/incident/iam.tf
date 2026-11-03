@@ -54,7 +54,7 @@ resource "aws_iam_role_policy" "bedrock_agent_ecr" {
   })
 }
 
-# ハーネス実行ロール：指定したグローバル推論でSolを呼び出す
+# ハーネス実行ロール：指定したグローバル推論でNova 2 Liteを呼び出す
 resource "aws_iam_role_policy" "bedrock_agent_inference" {
   name = "aii-dev-bedrock-agent-inference"
   role = aws_iam_role.bedrock_agent_execution.id
@@ -65,15 +65,15 @@ resource "aws_iam_role_policy" "bedrock_agent_inference" {
       {
         Effect   = "Allow"
         Action   = ["bedrock:InvokeModelWithResponseStream"]
-        Resource = "arn:aws:bedrock:ap-northeast-1:${data.aws_caller_identity.current.account_id}:inference-profile/global.openai.gpt-6.1-sol"
+        Resource = "arn:aws:bedrock:ap-northeast-1:${data.aws_caller_identity.current.account_id}:inference-profile/global.amazon.nova-2-lite-v1:0"
       },
       {
         Effect   = "Allow"
         Action   = ["bedrock:InvokeModelWithResponseStream"]
-        Resource = "arn:aws:bedrock:*::foundation-model/openai.gpt-6.1-sol"
+        Resource = "arn:aws:bedrock:*::foundation-model/amazon.nova-2-lite-v1:0"
         Condition = {
           ArnEquals = {
-            "bedrock:InferenceProfileArn" = "arn:aws:bedrock:ap-northeast-1:${data.aws_caller_identity.current.account_id}:inference-profile/global.openai.gpt-6.1-sol"
+            "bedrock:InferenceProfileArn" = "arn:aws:bedrock:ap-northeast-1:${data.aws_caller_identity.current.account_id}:inference-profile/global.amazon.nova-2-lite-v1:0"
           }
         }
       },
@@ -167,6 +167,8 @@ resource "aws_iam_role_policy" "bedrock_agent_metrics" {
         "cloudwatch:ListMetrics",
         "cloudwatch:GetMetricData",
         "cloudwatch:GetMetricStatistics",
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:DescribeAlarmHistory",
       ]
       Resource = "*"
       Condition = {
@@ -192,13 +194,19 @@ resource "aws_iam_role_policy" "bedrock_agent_logs" {
           "logs:StartQuery",
           "logs:GetQueryResults",
           "logs:FilterLogEvents",
+          "logs:DescribeLogStreams",
+          "logs:GetLogEvents",
         ]
-        Resource = var.nginx_log_group_arn
+        Resource = [
+          var.nginx_log_group_arn,
+          "${var.nginx_log_group_arn}:*",
+        ]
       },
       {
         Effect = "Allow"
         Action = [
           "logs:DescribeLogGroups",
+          "logs:DescribeQueryDefinitions",
           "logs:StopQuery",
         ]
         Resource = "*"
@@ -306,6 +314,10 @@ resource "aws_iam_role_policy" "lambda_invoke_harness" {
         "bedrock-agentcore:InvokeAgentRuntime",
       ]
       Resource = aws_bedrockagentcore_harness.incident.arn
+      }, {
+      Effect   = "Allow"
+      Action   = ["sns:Publish"]
+      Resource = aws_sns_topic.incident.arn
     }]
   })
 }

@@ -3,7 +3,7 @@
 import json
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import boto3
@@ -104,6 +104,11 @@ def lambda_handler(event, context):
     dimensions = metric["dimensions"]
     cluster_name = dimensions["ClusterName"]
     service_name = dimensions["ServiceName"]
+    observed_at = datetime.fromisoformat(alarm_time.replace("Z", "+00:00"))
+    if observed_at.tzinfo is None:
+        raise ValueError("alarm timestamp requires timezone")
+    start = observed_at - timedelta(minutes=10)
+    end = observed_at + timedelta(minutes=10)
 
     investigation_request = {
         "instruction": "このアラームの原因候補と対策を調査してください。",
@@ -111,6 +116,12 @@ def lambda_handler(event, context):
         "alarm_time": alarm_time,
         "cluster_name": cluster_name,
         "service_name": service_name,
+        "query_window": {
+            "start_iso_utc": start.astimezone(timezone.utc).isoformat(),
+            "end_iso_utc": end.astimezone(timezone.utc).isoformat(),
+            "logs_start_time_ms": int(start.timestamp() * 1000),
+            "logs_end_time_ms": int(end.timestamp() * 1000),
+        },
     }
 
     # 通知全体ではなく、受信確認に必要な項目だけを記録する。
@@ -126,6 +137,8 @@ def lambda_handler(event, context):
         connect_timeout=3, read_timeout=330,
         retries={"total_max_attempts": 1},
     ))
+    stop_reason = None
+    answer = []
     try:
         response = client.invoke_harness(
             harnessArn=harness_arn,
@@ -136,10 +149,15 @@ def lambda_handler(event, context):
             }],
         )
         stream = response["stream"]
-        stop_reason = None
         try:
             # 調査内容の本文はログへ出さず、最後まで応答を受け取る。
             for event in stream:
+                if "messageStart" in event:
+                    answer = []
+                if "contentBlockDelta" in event:
+                    delta = event["contentBlockDelta"].get("delta", {})
+                    if "text" in delta:
+                        answer.append(delta["text"])
                 if any(key in event for key in (
                     "runtimeClientError", "internalServerException", "validationException",
                 )):
@@ -149,12 +167,32 @@ def lambda_handler(event, context):
         finally:
             stream.close()
         if stop_reason != "end_turn":
-            raise RuntimeError("Harness investigation did not complete")
+            raise RuntimeError(f"Harness investigation did not complete: {stop_reason}")
+        report = "".join(answer).strip()
+        if not report:
+            raise RuntimeError("Harness returned no investigation report")
+        notification = {
+            "version": "1.0", "source": "custom",
+            "content": {
+                "textType": "client-markdown", "title": "Bedrockの調査結果",
+                "description": report[:8000],
+            },
+        }
+        published = boto3.client("sns", region_name="ap-northeast-1").publish(
+            TopicArn=os.environ["SNS_TOPIC_ARN"],
+            Subject="Bedrockの調査結果",
+            MessageStructure="json",
+            Message=json.dumps({
+                "default": json.dumps(notification, ensure_ascii=False),
+                "email": report,
+            }, ensure_ascii=False),
+        )
     except (ClientError, BotoCoreError, RuntimeError) as exc:
         print(json.dumps({
             "message": "Harness investigation failed",
             "alarm_name": alarm_name,
             "error_type": type(exc).__name__,
+            "stop_reason": stop_reason,
         }, ensure_ascii=False))
         raise
 
@@ -162,6 +200,7 @@ def lambda_handler(event, context):
         "status": "completed",
         "alarm_name": alarm_name,
         "state": state,
+        "notification_message_id": published["MessageId"],
         "cluster_name": cluster_name,
         "service_name": service_name,
         "investigation_request": investigation_request,

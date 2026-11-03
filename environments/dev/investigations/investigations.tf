@@ -15,6 +15,7 @@ resource "awscc_aiops_investigation_group" "investigations" {
     aws_iam_role_policy.investigations_metrics,
     aws_iam_role_policy.investigations_logs,
     aws_iam_role_policy.investigations_ecs,
+    aws_iam_role_policy.investigations_discovery,
     aws_sns_topic_policy.investigations,
   ]
 }

@@ -52,7 +52,7 @@ resource "aws_iam_role" "investigations" {
   })
 }
 
-# AI調査用ロール：メトリクスを読む
+# AI調査用ロール：メトリクスとアラーム・ダッシュボードを読む
 resource "aws_iam_role_policy" "investigations_metrics" {
   name = "aii-dev-investigations-read-metrics"
   role = aws_iam_role.investigations.id
@@ -65,6 +65,10 @@ resource "aws_iam_role_policy" "investigations_metrics" {
         "cloudwatch:ListMetrics",
         "cloudwatch:GetMetricData",
         "cloudwatch:GetMetricStatistics",
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:DescribeAlarmHistory",
+        "cloudwatch:ListDashboards",
+        "cloudwatch:GetDashboard",
       ]
       Resource = "*"
       Condition = {
@@ -91,12 +95,18 @@ resource "aws_iam_role_policy" "investigations_logs" {
           "logs:GetQueryResults",
           "logs:FilterLogEvents",
         ]
-        Resource = "arn:aws:logs:ap-northeast-1:${data.aws_caller_identity.current.account_id}:log-group:/aii/dev/ecs/nginx"
+        # Logs APIの認可で使う両方のARN表記を、同じロググループに限定して許可する。
+        Resource = [
+          "arn:aws:logs:ap-northeast-1:${data.aws_caller_identity.current.account_id}:log-group:/aii/dev/ecs/nginx",
+          "arn:aws:logs:ap-northeast-1:${data.aws_caller_identity.current.account_id}:log-group:/aii/dev/ecs/nginx:*",
+        ]
       },
       {
         Effect = "Allow"
         Action = [
           "logs:DescribeLogGroups",
+          "logs:DescribeQueryDefinitions",
+          "logs:ListLogGroupsForEntity",
           "logs:StopQuery",
         ]
         Resource = "*"
@@ -107,6 +117,33 @@ resource "aws_iam_role_policy" "investigations_logs" {
         }
       },
     ]
+  })
+}
+
+# AI調査用ロール：サービスとテレメトリの関連を探す。東京の読み取りだけを許可する。
+resource "aws_iam_role_policy" "investigations_discovery" {
+  name = "aii-dev-investigations-discover-resources"
+  role = aws_iam_role.investigations.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "application-signals:ListServices",
+        "application-signals:ListObservedEntities",
+        "application-signals:ListServiceLevelObjectives",
+        "cloudformation:GetResource",
+        "cloudtrail:DescribeTrails",
+        "tag:GetResources",
+      ]
+      Resource = "*"
+      Condition = {
+        StringEquals = {
+          "aws:RequestedRegion" = "ap-northeast-1"
+        }
+      }
+    }]
   })
 }
 

@@ -15,6 +15,7 @@ resource "aws_lambda_function" "incident" {
     variables = {
       HARNESS_ARN         = aws_bedrockagentcore_harness.incident.arn
       NGINX_LOG_GROUP_ARN = var.nginx_log_group_arn
+      SNS_TOPIC_ARN       = aws_sns_topic.incident.arn
     }
   }
 

@@ -9,12 +9,15 @@ resource "aws_bedrockagentcore_harness" "incident" {
   }
 
   environment_variables = {
-    SNS_TOPIC_ARN = aws_sns_topic.incident.arn
+    SNS_TOPIC_ARN       = aws_sns_topic.incident.arn
+    TARGET_ALARM_NAME   = "aii-dev-ecs-memory-high"
+    TARGET_CLUSTER_NAME = var.ecs_cluster_name
+    TARGET_SERVICE_NAME = var.ecs_service_name
   }
 
   model {
     bedrock_model_config {
-      model_id   = "global.openai.gpt-6.1-sol"
+      model_id   = "global.amazon.nova-2-lite-v1:0"
       api_format = "converse_stream"
     }
   }
@@ -31,5 +34,9 @@ resource "aws_bedrockagentcore_harness" "incident" {
   max_tokens      = 8192
   timeout_seconds = 300
 
-  depends_on = [aws_iam_role_policy.bedrock_agent_ecr]
+  depends_on = [
+    aws_iam_role_policy.bedrock_agent_ecr,
+    aws_iam_role_policy.bedrock_agent_inference,
+    aws_iam_role_policy.bedrock_agent_metrics,
+  ]
 }

@@ -150,10 +150,15 @@ class AlarmReceptionTests(unittest.TestCase):
             {"messageStop": {"stopReason": "end_turn"}},
         ]))
         runtime_client.invoke_harness.return_value = {"stream": response_body}
+        sns_client = Mock()
+        sns_client.publish.return_value = {"MessageId": "notification-1"}
         with (
-            patch.dict(os.environ, {"HARNESS_ARN": "arn:aws:bedrock-agentcore:ap-northeast-1:123456789012:harness/test-agent"}),
+            patch.dict(os.environ, {
+                "HARNESS_ARN": "arn:aws:bedrock-agentcore:ap-northeast-1:123456789012:harness/test-agent",
+                "SNS_TOPIC_ARN": "arn:aws:sns:ap-northeast-1:123456789012:incident",
+            }),
             patch.object(handler, "collect_nginx_logs") as collect,
-            patch.object(handler.boto3, "client", return_value=runtime_client) as create_client,
+            patch.object(handler.boto3, "client", side_effect=[runtime_client, sns_client]) as create_client,
             redirect_stdout(output),
         ):
             result = handler.lambda_handler(event, None)
@@ -174,8 +179,15 @@ class AlarmReceptionTests(unittest.TestCase):
         self.assertEqual(request["cluster_name"], "aii-dev-ecs-cluster")
         self.assertEqual(request["service_name"], "aii-dev-ecs-service-nginx")
         self.assertNotIn("PRIVATE_DETAIL", json.dumps(request))
-        self.assertEqual(create_client.call_args.args, ("bedrock-agentcore",))
-        self.assertEqual(create_client.call_args.kwargs["region_name"], "ap-northeast-1")
+        self.assertEqual(create_client.call_args_list[0].args, ("bedrock-agentcore",))
+        self.assertEqual(create_client.call_args_list[0].kwargs["region_name"], "ap-northeast-1")
+        self.assertEqual(result["notification_message_id"], "notification-1")
+        sns_client.publish.assert_called_once()
+        message = json.loads(sns_client.publish.call_args.kwargs["Message"])
+        self.assertEqual(message["email"], "PRIVATE_FINDINGS")
+        self.assertEqual(json.loads(message["default"])["content"]["description"], "PRIVATE_FINDINGS")
+        self.assertEqual(request["query_window"]["logs_start_time_ms"], 1793508600000)
+        self.assertEqual(request["query_window"]["logs_end_time_ms"] - request["query_window"]["logs_start_time_ms"], 1200000)
         runtime_client.invoke_harness.assert_called_once()
         runtime_client.invoke_agent_runtime.assert_not_called()
         invocation = runtime_client.invoke_harness.call_args.kwargs
@@ -189,6 +201,7 @@ class AlarmReceptionTests(unittest.TestCase):
             [],
             [{"messageStop": {"stopReason": "timeout_exceeded"}}],
             [{"messageStop": {"stopReason": "tool_use"}}],
+            [{"messageStop": {"stopReason": "end_turn"}}],
             [{"runtimeClientError": {"message": "PRIVATE_ERROR"}}],
         ):
             with self.subTest(events=events):
