@@ -38,3 +38,11 @@ dist/
 
 # macOS
 .DS_Store
+
+# ローカル認証情報・状態・生成物を公開しない
+!.env.sample
+*.p12
+*.pfx
+.terraform/
+cdk.out/
+node_modules/

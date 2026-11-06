@@ -208,3 +208,9 @@ Terraformのvalidateには、各実行先でProviderの初期化が必要です�
 - [ハーネスの権限](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html)
 - [GPT-6.1 Solの提供条件](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-1-sol.html)
 - [SNSのメール購読確認](https://docs.aws.amazon.com/sns/latest/dg/sns-email-notifications.html)
+
+## セキュリティ検査
+
+[![Security checks](https://github.com/tikyuu/aws-incident-intelligence/actions/workflows/security.yml/badge.svg)](https://github.com/tikyuu/aws-incident-intelligence/actions/workflows/security.yml)
+
+[検査の内容と制約](SECURITY.md)を参照してください。PRで秘密情報・依存関係を検査し、IaCの指摘も報告します。検査結果と対応履歴を確認しながら保守します。
