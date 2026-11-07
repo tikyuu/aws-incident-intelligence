@@ -1,0 +1,38 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directories: ["/"]
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:00'
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 2
+    groups:
+      minor-and-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
+  - package-ecosystem: "pip"
+    directories: ["/", "/environments/dev/incident/lambda"]
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:00'
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 2
+    groups:
+      minor-and-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
+  - package-ecosystem: "terraform"
+    directories: ["/environments/dev/ecs", "/environments/dev/incident", "/environments/dev/investigations", "/environments/dev/network"]
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:00'
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 2
+    groups:
+      minor-and-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
